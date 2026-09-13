@@ -261,7 +261,10 @@ def test_restart_migration_key_permissions_and_missing_key(tmp_path: Path) -> No
         cookies = dict(client.cookies)
         ciphertext = client.app.state.storage.cipher.encrypt(b"synthetic-secret")
         with client.app.state.storage.engine.connect() as connection:
-            assert connection.scalar(text("select version_num from alembic_version")) == "0001_auth"
+            assert (
+                connection.scalar(text("select version_num from alembic_version"))
+                == "0002_settings"
+            )
     key = (tmp_path / "encryption.key").read_bytes()
     assert stat.S_IMODE(tmp_path.stat().st_mode) == 0o700
     for file in ["encryption.key", "matescope.sqlite3"]:

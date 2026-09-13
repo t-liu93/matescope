@@ -13,6 +13,7 @@ from starlette.responses import Response
 
 from .auth import LoginLimiter, password_hasher, router
 from .config import Settings, settings
+from .settings import router as settings_router
 from .storage import Storage
 
 
@@ -52,6 +53,7 @@ def create_app(configuration: Settings | None = None) -> FastAPI:
     )
     application.state.settings = configuration
     application.include_router(router)
+    application.include_router(settings_router)
 
     @application.middleware("http")
     async def sensitive_cache_policy(

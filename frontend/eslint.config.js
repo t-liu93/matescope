@@ -16,7 +16,13 @@ export default [
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
     plugins: { "react-hooks": reactHooks, "react-refresh": reactRefresh },
-    rules: { ...reactHooks.configs.recommended.rules, "react-refresh/only-export-components": "warn" },
+    rules: {
+      ...reactHooks.configs.recommended.rules,
+      "react-refresh/only-export-components": "warn",
+      // The base rules do not understand TypeScript-only names.
+      "no-undef": "off",
+      "no-unused-vars": "off",
+    },
   },
   {
     files: ["playwright.config.ts"],

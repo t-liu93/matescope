@@ -123,6 +123,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Settings */
+        get: operations["get_settings_api_v1_settings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save Preferences */
+        put: operations["save_preferences_api_v1_settings_preferences_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/onboarding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save Onboarding */
+        put: operations["save_onboarding_api_v1_settings_onboarding_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/postgresql": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save Postgresql */
+        put: operations["save_postgresql_api_v1_settings_postgresql_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/mqtt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save Mqtt */
+        put: operations["save_mqtt_api_v1_settings_mqtt_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/smtp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save Smtp */
+        put: operations["save_smtp_api_v1_settings_smtp_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -230,12 +332,409 @@ export interface components {
              */
             password: string;
         };
+        /** MQTTInput */
+        MQTTInput: {
+            /**
+             * Host
+             * @default
+             */
+            host: string;
+            /**
+             * Username
+             * @default
+             */
+            username: string;
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled: boolean;
+            /**
+             * Skipped
+             * @default false
+             */
+            skipped: boolean;
+            /**
+             * Port
+             * @default 1883
+             */
+            port: number;
+            /**
+             * Tls
+             * @default false
+             */
+            tls: boolean;
+            /**
+             * Verify Tls
+             * @default true
+             */
+            verify_tls: boolean;
+            /**
+             * Topic Prefix
+             * @default teslamate
+             */
+            topic_prefix: string;
+            password?: components["schemas"]["PasswordChange"];
+        };
+        /** MQTTResponse */
+        MQTTResponse: {
+            /**
+             * Password Set
+             * @default false
+             */
+            password_set: boolean;
+            /**
+             * Version
+             * @default 0
+             */
+            version: number;
+            /**
+             * Status
+             * @default disabled
+             * @enum {string}
+             */
+            status: "unconfigured" | "unverified" | "disabled" | "skipped";
+            /**
+             * Test Available
+             * @default false
+             * @constant
+             */
+            test_available: false;
+            /**
+             * Host
+             * @default
+             */
+            host: string;
+            /**
+             * Username
+             * @default
+             */
+            username: string;
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled: boolean;
+            /**
+             * Skipped
+             * @default false
+             */
+            skipped: boolean;
+            /**
+             * Port
+             * @default 1883
+             */
+            port: number;
+            /**
+             * Tls
+             * @default false
+             */
+            tls: boolean;
+            /**
+             * Verify Tls
+             * @default true
+             */
+            verify_tls: boolean;
+            /**
+             * Topic Prefix
+             * @default teslamate
+             */
+            topic_prefix: string;
+        };
+        /** Onboarding */
+        Onboarding: {
+            /**
+             * Step
+             * @default preferences
+             * @enum {string}
+             */
+            step: "preferences" | "postgresql" | "mqtt" | "smtp" | "review";
+            /**
+             * Completed
+             * @default false
+             */
+            completed: boolean;
+        };
+        /** PasswordChange */
+        PasswordChange: {
+            /**
+             * Action
+             * @default retain
+             * @enum {string}
+             */
+            action: "retain" | "replace" | "clear";
+            /** Value */
+            value?: string | null;
+        };
+        /** PostgreSQLInput */
+        PostgreSQLInput: {
+            /**
+             * Host
+             * @default
+             */
+            host: string;
+            /**
+             * Username
+             * @default
+             */
+            username: string;
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled: boolean;
+            /**
+             * Skipped
+             * @default false
+             */
+            skipped: boolean;
+            /**
+             * Port
+             * @default 5432
+             */
+            port: number;
+            /**
+             * Database
+             * @default teslamate
+             */
+            database: string;
+            /**
+             * Sslmode
+             * @default prefer
+             * @enum {string}
+             */
+            sslmode: "disable" | "allow" | "prefer" | "require" | "verify-ca" | "verify-full";
+            password?: components["schemas"]["PasswordChange"];
+        };
+        /** PostgreSQLResponse */
+        PostgreSQLResponse: {
+            /**
+             * Password Set
+             * @default false
+             */
+            password_set: boolean;
+            /**
+             * Version
+             * @default 0
+             */
+            version: number;
+            /**
+             * Status
+             * @default disabled
+             * @enum {string}
+             */
+            status: "unconfigured" | "unverified" | "disabled" | "skipped";
+            /**
+             * Test Available
+             * @default false
+             * @constant
+             */
+            test_available: false;
+            /**
+             * Host
+             * @default
+             */
+            host: string;
+            /**
+             * Username
+             * @default
+             */
+            username: string;
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled: boolean;
+            /**
+             * Skipped
+             * @default false
+             */
+            skipped: boolean;
+            /**
+             * Port
+             * @default 5432
+             */
+            port: number;
+            /**
+             * Database
+             * @default teslamate
+             */
+            database: string;
+            /**
+             * Sslmode
+             * @default prefer
+             * @enum {string}
+             */
+            sslmode: "disable" | "allow" | "prefer" | "require" | "verify-ca" | "verify-full";
+        };
+        /** Preferences */
+        Preferences: {
+            /**
+             * Language
+             * @default en
+             * @enum {string}
+             */
+            language: "en" | "zh";
+            /**
+             * Timezone
+             * @default UTC
+             */
+            timezone: string;
+            /**
+             * Tile Url
+             * @default https://tile.openstreetmap.org/{z}/{x}/{y}.png
+             */
+            tile_url: string;
+        };
+        /** PreferencesResponse */
+        PreferencesResponse: {
+            /**
+             * Language
+             * @default en
+             * @enum {string}
+             */
+            language: "en" | "zh";
+            /**
+             * Timezone
+             * @default UTC
+             */
+            timezone: string;
+            /**
+             * Tile Url
+             * @default https://tile.openstreetmap.org/{z}/{x}/{y}.png
+             */
+            tile_url: string;
+            /**
+             * Saved
+             * @default false
+             */
+            saved: boolean;
+        };
         /** ReadinessResponse */
         ReadinessResponse: {
             /** Status */
             status: string;
             /** Service */
             service: string;
+        };
+        /** SMTPInput */
+        SMTPInput: {
+            /**
+             * Host
+             * @default
+             */
+            host: string;
+            /**
+             * Username
+             * @default
+             */
+            username: string;
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled: boolean;
+            /**
+             * Skipped
+             * @default false
+             */
+            skipped: boolean;
+            /**
+             * Port
+             * @default 587
+             */
+            port: number;
+            /**
+             * Tls Mode
+             * @default starttls
+             * @enum {string}
+             */
+            tls_mode: "implicit" | "starttls" | "plain";
+            /**
+             * Verify Tls
+             * @default true
+             */
+            verify_tls: boolean;
+            /**
+             * Sender
+             * @default
+             */
+            sender: string;
+            password?: components["schemas"]["PasswordChange"];
+        };
+        /** SMTPResponse */
+        SMTPResponse: {
+            /**
+             * Password Set
+             * @default false
+             */
+            password_set: boolean;
+            /**
+             * Version
+             * @default 0
+             */
+            version: number;
+            /**
+             * Status
+             * @default disabled
+             * @enum {string}
+             */
+            status: "unconfigured" | "unverified" | "disabled" | "skipped";
+            /**
+             * Test Available
+             * @default false
+             * @constant
+             */
+            test_available: false;
+            /**
+             * Host
+             * @default
+             */
+            host: string;
+            /**
+             * Username
+             * @default
+             */
+            username: string;
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled: boolean;
+            /**
+             * Skipped
+             * @default false
+             */
+            skipped: boolean;
+            /**
+             * Port
+             * @default 587
+             */
+            port: number;
+            /**
+             * Tls Mode
+             * @default starttls
+             * @enum {string}
+             */
+            tls_mode: "implicit" | "starttls" | "plain";
+            /**
+             * Verify Tls
+             * @default true
+             */
+            verify_tls: boolean;
+            /**
+             * Sender
+             * @default
+             */
+            sender: string;
+        };
+        /** SettingsResponse */
+        SettingsResponse: {
+            preferences?: components["schemas"]["PreferencesResponse"];
+            postgresql?: components["schemas"]["PostgreSQLResponse"];
+            mqtt?: components["schemas"]["MQTTResponse"];
+            smtp?: components["schemas"]["SMTPResponse"];
+            onboarding?: components["schemas"]["Onboarding"];
         };
         /** SetupStatus */
         SetupStatus: {
@@ -434,6 +933,191 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_settings_api_v1_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsResponse"];
+                };
+            };
+        };
+    };
+    save_preferences_api_v1_settings_preferences_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Preferences"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_onboarding_api_v1_settings_onboarding_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Onboarding"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_postgresql_api_v1_settings_postgresql_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PostgreSQLInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_mqtt_api_v1_settings_mqtt_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MQTTInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_smtp_api_v1_settings_smtp_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SMTPInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsResponse"];
+                };
             };
             /** @description Validation Error */
             422: {

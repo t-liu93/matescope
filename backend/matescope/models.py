@@ -29,3 +29,12 @@ class Instance(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     key_check: Mapped[str]
+
+
+class ApplicationSettings(Base):
+    __tablename__ = "application_settings"
+    __table_args__ = (CheckConstraint("id = 1", name="single_settings"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    configuration: Mapped[str]
+    encrypted_passwords: Mapped[str]

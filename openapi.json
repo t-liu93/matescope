@@ -198,6 +198,232 @@
         }
       }
     },
+    "/api/v1/settings": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Get Settings",
+        "operationId": "get_settings_api_v1_settings_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/settings/preferences": {
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Save Preferences",
+        "operationId": "save_preferences_api_v1_settings_preferences_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Preferences"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/settings/onboarding": {
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Save Onboarding",
+        "operationId": "save_onboarding_api_v1_settings_onboarding_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Onboarding"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/settings/postgresql": {
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Save Postgresql",
+        "operationId": "save_postgresql_api_v1_settings_postgresql_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PostgreSQLInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/settings/mqtt": {
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Save Mqtt",
+        "operationId": "save_mqtt_api_v1_settings_mqtt_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MQTTInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/settings/smtp": {
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Save Smtp",
+        "operationId": "save_smtp_api_v1_settings_smtp_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SMTPInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/health": {
       "get": {
         "tags": [
@@ -404,6 +630,413 @@
         ],
         "title": "LoginInput"
       },
+      "MQTTInput": {
+        "properties": {
+          "host": {
+            "type": "string",
+            "maxLength": 253,
+            "pattern": "^[^\\s/@?#]*$",
+            "title": "Host",
+            "default": ""
+          },
+          "username": {
+            "type": "string",
+            "maxLength": 256,
+            "pattern": "^[^\\r\\n\\x00]*$",
+            "title": "Username",
+            "default": ""
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": false
+          },
+          "skipped": {
+            "type": "boolean",
+            "title": "Skipped",
+            "default": false
+          },
+          "port": {
+            "type": "integer",
+            "maximum": 65535.0,
+            "minimum": 1.0,
+            "title": "Port",
+            "default": 1883
+          },
+          "tls": {
+            "type": "boolean",
+            "title": "Tls",
+            "default": false
+          },
+          "verify_tls": {
+            "type": "boolean",
+            "title": "Verify Tls",
+            "default": true
+          },
+          "topic_prefix": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[^+#\\x00\\r\\n]+$",
+            "title": "Topic Prefix",
+            "default": "teslamate"
+          },
+          "password": {
+            "$ref": "#/components/schemas/PasswordChange"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "MQTTInput"
+      },
+      "MQTTResponse": {
+        "properties": {
+          "password_set": {
+            "type": "boolean",
+            "title": "Password Set",
+            "default": false
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version",
+            "default": 0
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "unconfigured",
+              "unverified",
+              "disabled",
+              "skipped"
+            ],
+            "title": "Status",
+            "default": "disabled"
+          },
+          "test_available": {
+            "type": "boolean",
+            "const": false,
+            "title": "Test Available",
+            "default": false
+          },
+          "host": {
+            "type": "string",
+            "maxLength": 253,
+            "pattern": "^[^\\s/@?#]*$",
+            "title": "Host",
+            "default": ""
+          },
+          "username": {
+            "type": "string",
+            "maxLength": 256,
+            "pattern": "^[^\\r\\n\\x00]*$",
+            "title": "Username",
+            "default": ""
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": false
+          },
+          "skipped": {
+            "type": "boolean",
+            "title": "Skipped",
+            "default": false
+          },
+          "port": {
+            "type": "integer",
+            "maximum": 65535.0,
+            "minimum": 1.0,
+            "title": "Port",
+            "default": 1883
+          },
+          "tls": {
+            "type": "boolean",
+            "title": "Tls",
+            "default": false
+          },
+          "verify_tls": {
+            "type": "boolean",
+            "title": "Verify Tls",
+            "default": true
+          },
+          "topic_prefix": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[^+#\\x00\\r\\n]+$",
+            "title": "Topic Prefix",
+            "default": "teslamate"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "MQTTResponse"
+      },
+      "Onboarding": {
+        "properties": {
+          "step": {
+            "type": "string",
+            "enum": [
+              "preferences",
+              "postgresql",
+              "mqtt",
+              "smtp",
+              "review"
+            ],
+            "title": "Step",
+            "default": "preferences"
+          },
+          "completed": {
+            "type": "boolean",
+            "title": "Completed",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "Onboarding"
+      },
+      "PasswordChange": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "retain",
+              "replace",
+              "clear"
+            ],
+            "title": "Action",
+            "default": "retain"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4096,
+                "minLength": 1,
+                "format": "password",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "PasswordChange"
+      },
+      "PostgreSQLInput": {
+        "properties": {
+          "host": {
+            "type": "string",
+            "maxLength": 253,
+            "pattern": "^[^\\s/@?#]*$",
+            "title": "Host",
+            "default": ""
+          },
+          "username": {
+            "type": "string",
+            "maxLength": 256,
+            "pattern": "^[^\\r\\n\\x00]*$",
+            "title": "Username",
+            "default": ""
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": false
+          },
+          "skipped": {
+            "type": "boolean",
+            "title": "Skipped",
+            "default": false
+          },
+          "port": {
+            "type": "integer",
+            "maximum": 65535.0,
+            "minimum": 1.0,
+            "title": "Port",
+            "default": 5432
+          },
+          "database": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Database",
+            "default": "teslamate"
+          },
+          "sslmode": {
+            "type": "string",
+            "enum": [
+              "disable",
+              "allow",
+              "prefer",
+              "require",
+              "verify-ca",
+              "verify-full"
+            ],
+            "title": "Sslmode",
+            "default": "prefer"
+          },
+          "password": {
+            "$ref": "#/components/schemas/PasswordChange"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "PostgreSQLInput"
+      },
+      "PostgreSQLResponse": {
+        "properties": {
+          "password_set": {
+            "type": "boolean",
+            "title": "Password Set",
+            "default": false
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version",
+            "default": 0
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "unconfigured",
+              "unverified",
+              "disabled",
+              "skipped"
+            ],
+            "title": "Status",
+            "default": "disabled"
+          },
+          "test_available": {
+            "type": "boolean",
+            "const": false,
+            "title": "Test Available",
+            "default": false
+          },
+          "host": {
+            "type": "string",
+            "maxLength": 253,
+            "pattern": "^[^\\s/@?#]*$",
+            "title": "Host",
+            "default": ""
+          },
+          "username": {
+            "type": "string",
+            "maxLength": 256,
+            "pattern": "^[^\\r\\n\\x00]*$",
+            "title": "Username",
+            "default": ""
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": false
+          },
+          "skipped": {
+            "type": "boolean",
+            "title": "Skipped",
+            "default": false
+          },
+          "port": {
+            "type": "integer",
+            "maximum": 65535.0,
+            "minimum": 1.0,
+            "title": "Port",
+            "default": 5432
+          },
+          "database": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Database",
+            "default": "teslamate"
+          },
+          "sslmode": {
+            "type": "string",
+            "enum": [
+              "disable",
+              "allow",
+              "prefer",
+              "require",
+              "verify-ca",
+              "verify-full"
+            ],
+            "title": "Sslmode",
+            "default": "prefer"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "PostgreSQLResponse"
+      },
+      "Preferences": {
+        "properties": {
+          "language": {
+            "type": "string",
+            "enum": [
+              "en",
+              "zh"
+            ],
+            "title": "Language",
+            "default": "en"
+          },
+          "timezone": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Timezone",
+            "default": "UTC"
+          },
+          "tile_url": {
+            "type": "string",
+            "maxLength": 2048,
+            "title": "Tile Url",
+            "default": "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "Preferences"
+      },
+      "PreferencesResponse": {
+        "properties": {
+          "language": {
+            "type": "string",
+            "enum": [
+              "en",
+              "zh"
+            ],
+            "title": "Language",
+            "default": "en"
+          },
+          "timezone": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Timezone",
+            "default": "UTC"
+          },
+          "tile_url": {
+            "type": "string",
+            "maxLength": 2048,
+            "title": "Tile Url",
+            "default": "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+          },
+          "saved": {
+            "type": "boolean",
+            "title": "Saved",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "PreferencesResponse"
+      },
       "ReadinessResponse": {
         "properties": {
           "status": {
@@ -421,6 +1054,177 @@
           "service"
         ],
         "title": "ReadinessResponse"
+      },
+      "SMTPInput": {
+        "properties": {
+          "host": {
+            "type": "string",
+            "maxLength": 253,
+            "pattern": "^[^\\s/@?#]*$",
+            "title": "Host",
+            "default": ""
+          },
+          "username": {
+            "type": "string",
+            "maxLength": 256,
+            "pattern": "^[^\\r\\n\\x00]*$",
+            "title": "Username",
+            "default": ""
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": false
+          },
+          "skipped": {
+            "type": "boolean",
+            "title": "Skipped",
+            "default": false
+          },
+          "port": {
+            "type": "integer",
+            "maximum": 65535.0,
+            "minimum": 1.0,
+            "title": "Port",
+            "default": 587
+          },
+          "tls_mode": {
+            "type": "string",
+            "enum": [
+              "implicit",
+              "starttls",
+              "plain"
+            ],
+            "title": "Tls Mode",
+            "default": "starttls"
+          },
+          "verify_tls": {
+            "type": "boolean",
+            "title": "Verify Tls",
+            "default": true
+          },
+          "sender": {
+            "type": "string",
+            "maxLength": 320,
+            "pattern": "^(?:[^\\s<>@]+@[^\\s<>@]+)?$",
+            "title": "Sender",
+            "default": ""
+          },
+          "password": {
+            "$ref": "#/components/schemas/PasswordChange"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "SMTPInput"
+      },
+      "SMTPResponse": {
+        "properties": {
+          "password_set": {
+            "type": "boolean",
+            "title": "Password Set",
+            "default": false
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version",
+            "default": 0
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "unconfigured",
+              "unverified",
+              "disabled",
+              "skipped"
+            ],
+            "title": "Status",
+            "default": "disabled"
+          },
+          "test_available": {
+            "type": "boolean",
+            "const": false,
+            "title": "Test Available",
+            "default": false
+          },
+          "host": {
+            "type": "string",
+            "maxLength": 253,
+            "pattern": "^[^\\s/@?#]*$",
+            "title": "Host",
+            "default": ""
+          },
+          "username": {
+            "type": "string",
+            "maxLength": 256,
+            "pattern": "^[^\\r\\n\\x00]*$",
+            "title": "Username",
+            "default": ""
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": false
+          },
+          "skipped": {
+            "type": "boolean",
+            "title": "Skipped",
+            "default": false
+          },
+          "port": {
+            "type": "integer",
+            "maximum": 65535.0,
+            "minimum": 1.0,
+            "title": "Port",
+            "default": 587
+          },
+          "tls_mode": {
+            "type": "string",
+            "enum": [
+              "implicit",
+              "starttls",
+              "plain"
+            ],
+            "title": "Tls Mode",
+            "default": "starttls"
+          },
+          "verify_tls": {
+            "type": "boolean",
+            "title": "Verify Tls",
+            "default": true
+          },
+          "sender": {
+            "type": "string",
+            "maxLength": 320,
+            "pattern": "^(?:[^\\s<>@]+@[^\\s<>@]+)?$",
+            "title": "Sender",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "SMTPResponse"
+      },
+      "SettingsResponse": {
+        "properties": {
+          "preferences": {
+            "$ref": "#/components/schemas/PreferencesResponse"
+          },
+          "postgresql": {
+            "$ref": "#/components/schemas/PostgreSQLResponse"
+          },
+          "mqtt": {
+            "$ref": "#/components/schemas/MQTTResponse"
+          },
+          "smtp": {
+            "$ref": "#/components/schemas/SMTPResponse"
+          },
+          "onboarding": {
+            "$ref": "#/components/schemas/Onboarding"
+          }
+        },
+        "type": "object",
+        "title": "SettingsResponse"
       },
       "SetupStatus": {
         "properties": {
