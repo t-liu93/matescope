@@ -121,6 +121,9 @@ export const settingsApi = {
   testPostgresql: () => unwrap(api.POST("/api/v1/settings/postgresql/test")),
   mqtt: (body: components["schemas"]["MQTTInput"]) =>
     unwrap(api.PUT("/api/v1/settings/mqtt", { body })),
+  testMqtt: () => unwrap(api.POST("/api/v1/settings/mqtt/test")),
   smtp: (body: components["schemas"]["SMTPInput"]) =>
     unwrap(api.PUT("/api/v1/settings/smtp", { body })),
+  testSmtp: (body: components["schemas"]["SMTPTestInput"]) =>
+    unwrap(api.POST("/api/v1/settings/smtp/test", { body })),
 };

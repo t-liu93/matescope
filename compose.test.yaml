@@ -3,3 +3,10 @@ services:
   postgres:
     ports:
       - "127.0.0.1:${MATESCOPE_TEST_PG_PORT:-15432}:5432"
+  mqtt:
+    ports:
+      - "127.0.0.1:${MATESCOPE_TEST_MQTT_PORT:-11883}:1883"
+  mail:
+    ports:
+      - "127.0.0.1:${MATESCOPE_TEST_SMTP_PORT:-11025}:1025"
+      - "127.0.0.1:${MATESCOPE_TEST_MAIL_API_PORT:-18025}:8025"

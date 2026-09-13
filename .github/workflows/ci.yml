@@ -24,9 +24,10 @@ jobs:
       - run: uv sync --locked
       - run: uv run ruff check backend
       - run: uv run mypy backend/matescope
-      - run: docker compose -p matescope-ci-sql -f compose.yaml -f compose.dev.yaml -f compose.test.yaml up --detach --wait postgres
+      - run: docker compose -p matescope-ci-sql -f compose.yaml -f compose.dev.yaml -f compose.test.yaml up --detach --wait postgres mqtt mail
       - run: uv run pytest --junitxml=ci-artifacts/backend.xml
         env:
+          MATESCOPE_TEST_OPTIONAL_SERVICES: matescope-synthetic-m0-t05
           MATESCOPE_TEST_PG_DSN: postgresql://teslamate_admin:synthetic-only@127.0.0.1:15432/teslamate_synthetic
       - run: pnpm --dir frontend install --frozen-lockfile
       - run: pnpm --dir frontend rebuild esbuild --config.ignore-scripts=false
@@ -46,14 +47,14 @@ jobs:
       - if: always()
         run: mkdir -p ci-artifacts && docker compose -p matescope-ci -f compose.yaml -f compose.dev.yaml logs --no-color > ci-artifacts/compose.log || true
       - if: always()
-        run: docker compose -p matescope-ci-sql -f compose.yaml -f compose.dev.yaml -f compose.test.yaml logs --no-color > ci-artifacts/postgresql.log || true
+        run: docker compose -p matescope-ci-sql -f compose.yaml -f compose.dev.yaml -f compose.test.yaml logs --no-color > ci-artifacts/synthetic-services.log || true
       - if: always()
         uses: actions/upload-artifact@v4
         with:
           name: backend-test-results
           path: |
             ci-artifacts/backend.xml
-            ci-artifacts/postgresql.log
+            ci-artifacts/synthetic-services.log
           if-no-files-found: ignore
       - if: always()
         uses: actions/upload-artifact@v4

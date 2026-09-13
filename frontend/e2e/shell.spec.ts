@@ -13,6 +13,12 @@ test("onboarding saves, resumes, skips and supports later editing", async ({ pag
   if (creating) await page.getByLabel(/^Confirm password(?:\s*\*)?$/).fill(credentials.password);
   await page.getByRole("button", { name: creating ? "Create administrator" : "Sign in", exact: true }).click();
   await expect(page).not.toHaveURL(/\/login$/);
+  const settingsResponse = await page.request.get("/api/v1/settings");
+  expect(settingsResponse.ok()).toBe(true);
+  const savedSettings = (await settingsResponse.json()) as {
+    mqtt: { host: string };
+  };
+  const savedMqttHost = savedSettings.mqtt.host;
 
   // Revisit the same saved wizard on the second viewport without resetting application data.
   await page.goto("/setup");
@@ -36,7 +42,8 @@ test("onboarding saves, resumes, skips and supports later editing", async ({ pag
   await page.getByLabel(/^Password \(optional\)/).fill("synthetic-connection-password");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("heading", { name: "MQTT", exact: true })).toBeVisible();
-  await expect(page.getByLabel("Host", { exact: true })).toHaveValue("");
+  expect(savedMqttHost).not.toBe("synthetic-postgres");
+  await expect(page.getByLabel("Host", { exact: true })).toHaveValue(savedMqttHost);
   if (info.project.name === "desktop") {
     await page.goto("/settings");
     await page.getByRole("button", { name: "Sign out", exact: true }).click();

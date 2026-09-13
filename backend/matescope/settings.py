@@ -1,6 +1,7 @@
 """Web-managed instance preferences and connection configuration (no external I/O)."""
 
 import json
+import re
 from datetime import UTC, datetime
 from typing import Literal
 from urllib.parse import urlsplit
@@ -99,11 +100,36 @@ class MQTTFields(OptionalFields):
     )
 
 
+def validate_mailbox(value: str) -> str:
+    # A deliberately narrow single ASCII mailbox; no display names, lists or headers.
+    if (
+        len(value) > 254
+        or not re.fullmatch(
+            r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*"
+            r"@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
+            r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*",
+            value,
+        )
+        or len(value.split("@")[0]) > 64
+    ):
+        raise ValueError("Use one ASCII email address")
+    return value
+
+
 class SMTPFields(OptionalFields):
     port: int = Field(default=587, ge=1, le=65535)
     tls_mode: Literal["implicit", "starttls", "plain"] = "starttls"
     verify_tls: bool = True
-    sender: str = Field(default="", max_length=320, pattern=r"^(?:[^\s<>@]+@[^\s<>@]+)?$")
+    sender: str = Field(default="", max_length=320)
+
+
+class SMTPTestInput(InputModel):
+    recipient: str = Field(min_length=3, max_length=254)
+
+    @field_validator("recipient")
+    @classmethod
+    def valid_recipient(cls, value: str) -> str:
+        return validate_mailbox(value)
 
 
 class PostgreSQLInput(PostgreSQLFields):
@@ -115,6 +141,11 @@ class MQTTInput(MQTTFields):
 
 
 class SMTPInput(SMTPFields):
+    @field_validator("sender")
+    @classmethod
+    def valid_sender(cls, value: str) -> str:
+        return validate_mailbox(value) if value else value
+
     password: PasswordChange = Field(default_factory=PasswordChange)
 
 
@@ -158,12 +189,59 @@ class PostgreSQLResponse(PostgreSQLFields, ConnectionState):
         return True
 
 
-class MQTTResponse(MQTTFields, ConnectionState):
-    status: Literal["unconfigured", "unverified", "disabled", "skipped"] = "disabled"
+class OptionalTestResult(BaseModel):
+    version: int
+    status: Literal["success", "failure"]
+    code: Literal[
+        "subscription_accepted",
+        "message_received",
+        "delivery_accepted",
+        "disabled",
+        "skipped",
+        "unconfigured",
+        "invalid_credentials",
+        "unavailable",
+        "timeout",
+        "tls_error",
+        "configuration_changed",
+        "busy",
+        "subscription_rejected",
+        "sender_rejected",
+        "recipient_rejected",
+        "message_rejected",
+        "tls_unavailable",
+        "protocol_error",
+    ]
+    tested_at: datetime
+    persisted: bool = False
 
 
-class SMTPResponse(SMTPFields, ConnectionState):
-    status: Literal["unconfigured", "unverified", "disabled", "skipped"] = "disabled"
+class MQTTTestResult(OptionalTestResult):
+    message_received: bool = False
+
+
+class SMTPTestResult(OptionalTestResult):
+    delivery_accepted: bool = False
+
+
+class OptionalResponse(ConnectionState):
+    status: Literal["unconfigured", "unverified", "disabled", "skipped", "success", "failure"] = (
+        "disabled"
+    )
+    test_available: bool = True
+
+    @field_validator("test_available", mode="before")
+    @classmethod
+    def supports_test(cls, value: object) -> bool:
+        return True
+
+
+class MQTTResponse(MQTTFields, OptionalResponse):
+    test_result: MQTTTestResult | None = None
+
+
+class SMTPResponse(SMTPFields, OptionalResponse):
+    test_result: SMTPTestResult | None = None
 
 
 class Onboarding(InputModel):
@@ -250,7 +328,7 @@ def save_connection(
             password_set=name in passwords,
             version=getattr(result, name).version + 1,
             status=status,
-            test_available=name == "postgresql",
+            test_available=True,
         )
         response_types: dict[str, type[BaseModel]] = {
             "postgresql": PostgreSQLResponse,
@@ -309,4 +387,57 @@ def test_postgresql(request: Request) -> PostgreSQLTestResult:
         current.postgresql.status = result.status
         current.postgresql.test_result = result
         record.configuration = current.model_dump_json()
+    return result
+
+
+def test_optional(
+    name: Literal["mqtt", "smtp"], request: Request, recipient: str = ""
+) -> MQTTTestResult | SMTPTestResult:
+    from .connection_tests import run_test
+
+    with Session(storage(request).engine) as session:
+        config = getattr(read_settings(session), name)
+        record = session.get(ApplicationSettings, 1)
+        encrypted = json.loads(record.encrypted_passwords).get(name) if record else None
+        password = storage(request).cipher.decrypt(encrypted.encode()).decode() if encrypted else ""
+    code, observed = run_test(name, config, password, recipient)
+    fields = dict(
+        version=config.version,
+        status="success"
+        if code in {"subscription_accepted", "message_received", "delivery_accepted"}
+        else "failure",
+        code=code,
+        tested_at=datetime.now(UTC),
+    )
+    result: MQTTTestResult | SMTPTestResult = (
+        MQTTTestResult.model_validate({**fields, "message_received": observed})
+        if name == "mqtt"
+        else SMTPTestResult.model_validate({**fields, "delivery_accepted": observed})
+    )
+    with storage(request).transaction() as session:
+        record = record_for_write(request, session)
+        current = SettingsResponse.model_validate_json(record.configuration)
+        target = getattr(current, name)
+        if target.version != config.version:
+            result.status = "failure"
+            result.code = "configuration_changed"
+            return result
+        result.persisted = True
+        target.status = result.status
+        target.test_result = result
+        record.configuration = current.model_dump_json()
+    return result
+
+
+@router.post("/mqtt/test", response_model=MQTTTestResult, dependencies=[WriteProtection])
+def test_mqtt(request: Request) -> MQTTTestResult:
+    result = test_optional("mqtt", request)
+    assert isinstance(result, MQTTTestResult)
+    return result
+
+
+@router.post("/smtp/test", response_model=SMTPTestResult, dependencies=[WriteProtection])
+def test_smtp(body: SMTPTestInput, request: Request) -> SMTPTestResult:
+    result = test_optional("smtp", request, body.recipient)
+    assert isinstance(result, SMTPTestResult)
     return result

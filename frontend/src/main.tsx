@@ -49,6 +49,10 @@ type PostgreSQLInput = components["schemas"]["PostgreSQLInput"];
 type MqttInput = components["schemas"]["MQTTInput"];
 type SmtpInput = components["schemas"]["SMTPInput"];
 type PostgreSQLResponse = components["schemas"]["PostgreSQLResponse"];
+type ConnectionTestResult =
+  | components["schemas"]["PostgreSQLTestResult"]
+  | components["schemas"]["MQTTTestResult"]
+  | components["schemas"]["SMTPTestResult"];
 const steps: Step[] = ["preferences", "postgresql", "mqtt", "smtp", "review"];
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false, staleTime: 0 } },
@@ -62,6 +66,20 @@ function errorMessage(error: unknown, t: (key: string) => unknown): string {
     if (error.status === 422) return String(t("requestFailed"));
   }
   return String(t("requestFailed"));
+}
+
+function testErrorMessage(
+  kind: Kind,
+  error: unknown,
+  t: (key: string) => unknown,
+): string {
+  if (kind !== "smtp") return errorMessage(error, t);
+  if (error instanceof ApiError) {
+    if (error.status === 401) return String(t("sessionExpired"));
+    if (error.status === 422) return String(t("smtpTestRejected"));
+    if (error.status < 500) return String(t("smtpTestFailed"));
+  }
+  return String(t("smtpTestUnknown"));
 }
 
 function useSettings() {
@@ -80,7 +98,23 @@ function statusKey(status: string) {
   return `status${status.slice(0, 1).toUpperCase()}${status.slice(1)}`;
 }
 
-function testCodeKey(code: string) {
+function testCodeKey(kind: Kind, code: string) {
+  if (kind !== "postgresql") {
+    const shared = new Set([
+      "unconfigured",
+      "disabled",
+      "skipped",
+      "invalid_credentials",
+      "unavailable",
+      "timeout",
+    ]);
+    if (shared.has(code)) {
+      const camelCase = code.replace(/_([a-z])/g, (_, letter: string) =>
+        letter.toUpperCase(),
+      );
+      return `testCodeService${camelCase.slice(0, 1).toUpperCase()}${camelCase.slice(1)}`;
+    }
+  }
   const camelCase = code.replace(/_([a-z])/g, (_, letter: string) =>
     letter.toUpperCase(),
   );
@@ -332,6 +366,19 @@ function saveConnection(
   return settingsApi.smtp(input as SmtpInput);
 }
 
+function savedConnectionInput(kind: Kind, data: Settings[Kind]) {
+  if (kind === "postgresql") {
+    const value = data as PostgreSQLResponse;
+    return { host: value.host, username: value.username, port: value.port, enabled: value.enabled, skipped: value.skipped, database: value.database, sslmode: value.sslmode };
+  }
+  if (kind === "mqtt") {
+    const value = data as Settings["mqtt"];
+    return { host: value!.host, username: value!.username, port: value!.port, enabled: value!.enabled, skipped: value!.skipped, tls: value!.tls, verify_tls: value!.verify_tls, topic_prefix: value!.topic_prefix };
+  }
+  const value = data as Settings["smtp"];
+  return { host: value!.host, username: value!.username, port: value!.port, enabled: value!.enabled, skipped: value!.skipped, tls_mode: value!.tls_mode, verify_tls: value!.verify_tls, sender: value!.sender };
+}
+
 function Connection({
   kind,
   settings,
@@ -349,6 +396,7 @@ function Connection({
   const [enabled, setEnabled] = useState(data.enabled);
   const [action, setAction] = useState<PasswordAction>("retain");
   const [password, setPassword] = useState("");
+  const [recipient, setRecipient] = useState("");
   const [extra, setExtra] = useState<Record<string, string | boolean>>(
     kind === "postgresql"
       ? {
@@ -379,14 +427,14 @@ function Connection({
       ...(!skipped && action === "replace" ? { value: password } : {}),
     },
   });
-  const [testResult, setTestResult] = useState(
-    (data as PostgreSQLResponse).test_result ?? null,
+  const [testResult, setTestResult] = useState<ConnectionTestResult | null>(
+    data.test_result ?? null,
   );
-  const pgData = data as PostgreSQLResponse;
-  const localTestResult =
-    testResult?.version === pgData.version ? testResult : null;
   const savedTestResult =
-    pgData.test_result?.version === pgData.version ? pgData.test_result : null;
+    data.test_result?.version === data.version
+      ? data.test_result
+      : null;
+  const localTestResult = testResult?.version === data.version ? testResult : null;
   const displayedTestResult =
     testResult?.persisted === false
       ? testResult
@@ -395,10 +443,6 @@ function Connection({
           new Date(savedTestResult.tested_at) > new Date(localTestResult.tested_at)
         ? savedTestResult
         : localTestResult ?? savedTestResult;
-  const displayedStatus =
-    kind === "postgresql" && displayedTestResult
-      ? displayedTestResult.status
-      : data.status;
   const save = useMutation({
     mutationFn: () =>
       saveConnection(
@@ -406,61 +450,82 @@ function Connection({
         input(false) as PostgreSQLInput | MqttInput | SmtpInput,
       ),
     onSuccess: (result) => {
+      test.reset();
       queryClient.setQueryData(["settings"], result);
       setPassword("");
       setAction("retain");
-      if (kind === "postgresql") setTestResult(null);
+      setTestResult(null);
       afterSave?.();
     },
   });
-  const persistedInput =
-    kind === "postgresql"
-      ? {
-          host: pgData.host,
-          username: pgData.username,
-          port: pgData.port,
-          enabled: pgData.enabled,
-          skipped: pgData.skipped,
-          database: pgData.database,
-          sslmode: pgData.sslmode,
-        }
-      : null;
-  const currentInput =
-    kind === "postgresql"
-      ? {
-          host,
-          username,
-          port: Number(port),
-          enabled,
-          skipped: false,
-          database: String(extra.database),
-          sslmode: String(extra.sslmode),
-        }
-      : null;
+  const persistedInput = savedConnectionInput(kind, data);
+  const currentInput = {
+    host,
+    username,
+    port: Number(port),
+    enabled,
+    skipped: false,
+    ...extra,
+  };
   const hasUnsavedChanges =
-    kind === "postgresql" &&
-    (JSON.stringify(currentInput) !== JSON.stringify(persistedInput) ||
+    JSON.stringify(currentInput) !== JSON.stringify(persistedInput) ||
       action !== "retain" ||
-      Boolean(password));
-  const test = useMutation({
-    mutationFn: settingsApi.testPostgresql,
+      Boolean(password);
+  const recipientValid =
+    recipient.length <= 320 &&
+    /^[\x21-\x7e]+$/.test(recipient) &&
+    /^[^\s@,]+@[^\s@,]+$/.test(recipient);
+  const test = useMutation<ConnectionTestResult>({
+    mutationFn: async () => {
+      const result =
+        kind === "postgresql"
+          ? await settingsApi.testPostgresql()
+          : kind === "mqtt"
+            ? await settingsApi.testMqtt()
+            : await settingsApi.testSmtp({ recipient });
+      return result;
+    },
+    onMutate: () => {
+      setTestResult(null);
+    },
     onSuccess: async (result) => {
       setTestResult(result);
-      const refreshed = await settingsApi.get();
-      queryClient.setQueryData(["settings"], refreshed);
-      const confirmed = refreshed.postgresql;
-      if (confirmed) {
-        setHost(confirmed.host);
-        setUsername(confirmed.username);
-        setPort(String(confirmed.port));
-        setEnabled(confirmed.enabled);
-        setExtra({ database: confirmed.database, sslmode: confirmed.sslmode });
-        setAction("retain");
-        setPassword("");
+      try {
+        const refreshed = await settingsApi.get();
+        queryClient.setQueryData(["settings"], refreshed);
+        const confirmed = refreshed[kind]!;
+        if (confirmed) {
+          setHost(confirmed.host);
+          setUsername(confirmed.username);
+          setPort(String(confirmed.port));
+          setEnabled(confirmed.enabled);
+          if (kind === "postgresql") {
+            const postgresql = confirmed as PostgreSQLResponse;
+            setExtra({ database: postgresql.database, sslmode: postgresql.sslmode });
+          } else if (kind === "mqtt") {
+            const mqtt = confirmed as Settings["mqtt"];
+            setExtra({ tls: mqtt!.tls, verify_tls: mqtt!.verify_tls, topic_prefix: mqtt!.topic_prefix });
+          } else {
+            const smtp = confirmed as Settings["smtp"];
+            setExtra({ tls_mode: smtp!.tls_mode, verify_tls: smtp!.verify_tls, sender: smtp!.sender });
+          }
+          setAction("retain");
+          setPassword("");
+        }
+      } catch {
+        // Keep the structured test result visible when only the follow-up refresh fails.
       }
       setTestResult(result);
     },
   });
+  const displayedStatus =
+    test.isPending
+      ? "unverified"
+      : test.error
+        ? "failure"
+        : displayedTestResult
+          ? displayedTestResult.status
+          : data.status;
   const skip = useMutation({
     mutationFn: () =>
       saveConnection(
@@ -468,6 +533,7 @@ function Connection({
         input(true) as PostgreSQLInput | MqttInput | SmtpInput,
       ),
     onSuccess: (result) => {
+      test.reset();
       queryClient.setQueryData(["settings"], result);
       const confirmed = result[kind]!;
       setHost(confirmed.host);
@@ -497,7 +563,7 @@ function Connection({
       }
       setAction("retain");
       setPassword("");
-      if (kind === "postgresql") setTestResult(null);
+      setTestResult(null);
       afterSave?.();
     },
   });
@@ -638,43 +704,95 @@ function Connection({
               : "smtpHelp",
         )}
       </Alert>
-      {kind === "postgresql" && (
-        <Stack gap="xs">
-          <Button
-            variant="light"
-            onClick={() => test.mutate()}
-            loading={test.isPending}
-            disabled={hasUnsavedChanges}
+      <Stack gap="xs">
+        {kind === "smtp" && (
+          <TextInput
+            label={t("smtpRecipient")}
+            description={t("smtpRecipientHelp")}
+            type="email"
+            value={recipient}
+            onChange={(e) => setRecipient(e.currentTarget.value)}
+            required
+          />
+        )}
+        <Button
+          variant="light"
+          onClick={() => test.mutate()}
+          loading={test.isPending}
+          disabled={hasUnsavedChanges || (kind === "smtp" && !recipientValid)}
+        >
+          {test.isPending
+            ? t(
+                kind === "smtp"
+                  ? "testingSmtp"
+                  : kind === "mqtt"
+                    ? "testingMqtt"
+                    : "testingConnection",
+              )
+            : t(
+                kind === "smtp"
+                  ? "testSmtp"
+                  : kind === "mqtt"
+                    ? "testMqtt"
+                    : "testConnection",
+              )}
+        </Button>
+        {hasUnsavedChanges && (
+          <Text size="sm" c="dimmed">
+            {t("saveFirstToTest")}
+          </Text>
+        )}
+        {kind === "smtp" && !recipientValid && (
+          <Text size="sm" c="dimmed">
+            {t("validRecipientRequired")}
+          </Text>
+        )}
+        {test.error && <Alert color="red">{testErrorMessage(kind, test.error, t)}</Alert>}
+        {!test.error && !test.isPending && displayedTestResult && (
+          <Alert
+            color={displayedTestResult.status === "success" ? "green" : "red"}
           >
-            {test.isPending ? t("testingConnection") : t("testConnection")}
-          </Button>
-          {hasUnsavedChanges && <Text size="sm" c="dimmed">{t("saveFirstToTest")}</Text>}
-          {test.error && <Alert color="red">{errorMessage(test.error, t)}</Alert>}
-          {displayedTestResult && (
-            <Alert
-              color={displayedTestResult.status === "success" ? "green" : "red"}
-            >
-              <Stack gap={2}>
-                <Text fw={600}>
+            <Stack gap={2}>
+              <Text fw={600}>
+                {t(
+                  displayedTestResult.status === "success"
+                    ? "testSuccess"
+                    : "testFailure",
+                )}
+              </Text>
+              <Text>{t(testCodeKey(kind, displayedTestResult.code))}</Text>
+              {kind === "mqtt" && "message_received" in displayedTestResult && (
+                <Text>
                   {t(
-                    displayedTestResult.status === "success"
-                      ? "testSuccess"
-                      : "testFailure",
+                    displayedTestResult.message_received
+                      ? "mqttMessageReceived"
+                      : "mqttNoMessage",
                   )}
                 </Text>
-                <Text>{t(testCodeKey(displayedTestResult.code))}</Text>
-                <Text size="sm" c="dimmed">
-                  {t("testAt")}: {new Intl.DateTimeFormat(undefined, {
-                    dateStyle: "medium",
-                    timeStyle: "short",
-                    timeZone: settings.preferences?.timezone || "UTC",
-                  }).format(new Date(displayedTestResult.tested_at))}
-                </Text>
-              </Stack>
-            </Alert>
-          )}
-        </Stack>
-      )}
+              )}
+              {kind === "smtp" &&
+                "delivery_accepted" in displayedTestResult &&
+                displayedTestResult.code === "configuration_changed" &&
+                displayedTestResult.delivery_accepted && (
+                  <Text>{t("configurationChangedExternalAction")}</Text>
+                )}
+              {kind === "smtp" &&
+                displayedTestResult.status === "failure" &&
+                ["timeout", "unavailable", "protocol_error", "tls_error"].includes(
+                  displayedTestResult.code,
+                ) && <Text>{t("smtpDeliveryUncertain")}</Text>}
+              <Text size="sm" c="dimmed">
+                {t("testAt")}: {" "}
+                {new Intl.DateTimeFormat(undefined, {
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                  timeZone: settings.preferences?.timezone || "UTC",
+                }).format(new Date(displayedTestResult.tested_at))}
+              </Text>
+            </Stack>
+          </Alert>
+        )}
+      </Stack>
       <Group grow>
         <Button onClick={() => save.mutate()} loading={save.isPending}>
           {t("save")}

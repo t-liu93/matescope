@@ -19,9 +19,17 @@ services:
     image: eclipse-mosquitto:2.0.22
     volumes:
       - ./docker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./docker/mosquitto.passwords:/mosquitto/config/passwords:ro
+      - ./docker/mosquitto.acl:/mosquitto/config/acl:ro
     networks: [matescope-dev]
   mail:
     image: axllent/mailpit:v1.27.8
+    environment:
+      MP_SMTP_AUTH: matescope_synthetic:synthetic-smtp-only
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+      MP_SMTP_DISABLE_RDNS: "true"
+      MP_DISABLE_VERSION_CHECK: "true"
+      MP_LABEL: matescope-synthetic-m0-t05
     networks: [matescope-dev]
   app:
     environment:

@@ -445,6 +445,68 @@
         }
       }
     },
+    "/api/v1/settings/mqtt/test": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Test Mqtt",
+        "operationId": "test_mqtt_api_v1_settings_mqtt_test_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MQTTTestResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/settings/smtp/test": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Test Smtp",
+        "operationId": "test_smtp_api_v1_settings_smtp_test_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SMTPTestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SMTPTestResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/diagnostics": {
       "get": {
         "tags": [
@@ -1090,11 +1152,19 @@
         "properties": {
           "postgresql": {
             "$ref": "#/components/schemas/PostgreSQLResponse"
+          },
+          "mqtt": {
+            "$ref": "#/components/schemas/MQTTResponse"
+          },
+          "smtp": {
+            "$ref": "#/components/schemas/SMTPResponse"
           }
         },
         "type": "object",
         "required": [
-          "postgresql"
+          "postgresql",
+          "mqtt",
+          "smtp"
         ],
         "title": "Diagnostics"
       },
@@ -1233,7 +1303,20 @@
           "test_available": {
             "type": "boolean",
             "title": "Test Available",
-            "default": false
+            "default": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "unconfigured",
+              "unverified",
+              "disabled",
+              "skipped",
+              "success",
+              "failure"
+            ],
+            "title": "Status",
+            "default": "disabled"
           },
           "host": {
             "type": "string",
@@ -1284,21 +1367,83 @@
             "title": "Topic Prefix",
             "default": "teslamate"
           },
-          "status": {
-            "type": "string",
-            "enum": [
-              "unconfigured",
-              "unverified",
-              "disabled",
-              "skipped"
-            ],
-            "title": "Status",
-            "default": "disabled"
+          "test_result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MQTTTestResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
         "type": "object",
         "title": "MQTTResponse"
+      },
+      "MQTTTestResult": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "failure"
+            ],
+            "title": "Status"
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "subscription_accepted",
+              "message_received",
+              "delivery_accepted",
+              "disabled",
+              "skipped",
+              "unconfigured",
+              "invalid_credentials",
+              "unavailable",
+              "timeout",
+              "tls_error",
+              "configuration_changed",
+              "busy",
+              "subscription_rejected",
+              "sender_rejected",
+              "recipient_rejected",
+              "message_rejected",
+              "tls_unavailable",
+              "protocol_error"
+            ],
+            "title": "Code"
+          },
+          "tested_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Tested At"
+          },
+          "persisted": {
+            "type": "boolean",
+            "title": "Persisted",
+            "default": false
+          },
+          "message_received": {
+            "type": "boolean",
+            "title": "Message Received",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "version",
+          "status",
+          "code",
+          "tested_at"
+        ],
+        "title": "MQTTTestResult"
       },
       "Onboarding": {
         "properties": {
@@ -1731,7 +1876,6 @@
           "sender": {
             "type": "string",
             "maxLength": 320,
-            "pattern": "^(?:[^\\s<>@]+@[^\\s<>@]+)?$",
             "title": "Sender",
             "default": ""
           },
@@ -1758,7 +1902,20 @@
           "test_available": {
             "type": "boolean",
             "title": "Test Available",
-            "default": false
+            "default": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "unconfigured",
+              "unverified",
+              "disabled",
+              "skipped",
+              "success",
+              "failure"
+            ],
+            "title": "Status",
+            "default": "disabled"
           },
           "host": {
             "type": "string",
@@ -1809,25 +1966,102 @@
           "sender": {
             "type": "string",
             "maxLength": 320,
-            "pattern": "^(?:[^\\s<>@]+@[^\\s<>@]+)?$",
             "title": "Sender",
             "default": ""
           },
-          "status": {
-            "type": "string",
-            "enum": [
-              "unconfigured",
-              "unverified",
-              "disabled",
-              "skipped"
-            ],
-            "title": "Status",
-            "default": "disabled"
+          "test_result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SMTPTestResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
         "type": "object",
         "title": "SMTPResponse"
+      },
+      "SMTPTestInput": {
+        "properties": {
+          "recipient": {
+            "type": "string",
+            "maxLength": 254,
+            "minLength": 3,
+            "title": "Recipient"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "recipient"
+        ],
+        "title": "SMTPTestInput"
+      },
+      "SMTPTestResult": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "failure"
+            ],
+            "title": "Status"
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "subscription_accepted",
+              "message_received",
+              "delivery_accepted",
+              "disabled",
+              "skipped",
+              "unconfigured",
+              "invalid_credentials",
+              "unavailable",
+              "timeout",
+              "tls_error",
+              "configuration_changed",
+              "busy",
+              "subscription_rejected",
+              "sender_rejected",
+              "recipient_rejected",
+              "message_rejected",
+              "tls_unavailable",
+              "protocol_error"
+            ],
+            "title": "Code"
+          },
+          "tested_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Tested At"
+          },
+          "persisted": {
+            "type": "boolean",
+            "title": "Persisted",
+            "default": false
+          },
+          "delivery_accepted": {
+            "type": "boolean",
+            "title": "Delivery Accepted",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "version",
+          "status",
+          "code",
+          "tested_at"
+        ],
+        "title": "SMTPTestResult"
       },
       "SettingsResponse": {
         "properties": {

@@ -55,7 +55,7 @@ def test_secret_lifecycle(client: TestClient, section: str) -> None:  # noqa: F8
     assert isinstance(current, dict)
     assert current["password_set"] and current["version"] == 1
     assert current["status"] == "unverified"
-    assert current["test_available"] is (section == "postgresql")
+    assert current["test_available"] is True
     assert secret not in json.dumps(response) and "password" not in current
     with Session(client.app.state.storage.engine) as session:
         record = session.get(ApplicationSettings, 1)

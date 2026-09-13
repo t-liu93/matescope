@@ -14,7 +14,7 @@ from pydantic import BaseModel, field_validator
 
 from .auth import require_admin, storage
 from .postgresql import classify, snapshot
-from .settings import PostgreSQLResponse, read_settings
+from .settings import MQTTResponse, PostgreSQLResponse, SMTPResponse, read_settings
 
 router = APIRouter(prefix="/api/v1", tags=["history"], dependencies=[Depends(require_admin)])
 
@@ -87,6 +87,8 @@ class Trajectory(BaseModel):
 
 class Diagnostics(BaseModel):
     postgresql: PostgreSQLResponse
+    mqtt: MQTTResponse
+    smtp: SMTPResponse
 
 
 @contextmanager
@@ -106,7 +108,8 @@ def diagnostics(request: Request) -> Diagnostics:
     from sqlalchemy.orm import Session
 
     with Session(storage(request).engine) as session:
-        return Diagnostics(postgresql=read_settings(session).postgresql)
+        current = read_settings(session)
+        return Diagnostics(postgresql=current.postgresql, mqtt=current.mqtt, smtp=current.smtp)
 
 
 @router.get("/vehicles", response_model=Vehicles)

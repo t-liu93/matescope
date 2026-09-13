@@ -122,7 +122,7 @@ test("uses confirmed skipped state for the next MQTT save", async ({
   await expect(
     mqtt.getByRole("checkbox", { name: "Enabled" }),
   ).not.toBeChecked();
-  await mqtt.getByRole("button", { name: "Save" }).click();
+  await mqtt.getByRole("button", { name: "Save", exact: true }).click();
   await expect
     .poll(() => lastMqttBody)
     .toMatchObject({ enabled: false, skipped: false });

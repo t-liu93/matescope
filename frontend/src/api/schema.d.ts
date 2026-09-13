@@ -242,6 +242,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/mqtt/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test Mqtt */
+        post: operations["test_mqtt_api_v1_settings_mqtt_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/smtp/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test Smtp */
+        post: operations["test_smtp_api_v1_settings_smtp_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/diagnostics": {
         parameters: {
             query?: never;
@@ -482,6 +516,8 @@ export interface components {
         /** Diagnostics */
         Diagnostics: {
             postgresql: components["schemas"]["PostgreSQLResponse"];
+            mqtt: components["schemas"]["MQTTResponse"];
+            smtp: components["schemas"]["SMTPResponse"];
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -565,9 +601,15 @@ export interface components {
             version: number;
             /**
              * Test Available
-             * @default false
+             * @default true
              */
             test_available: boolean;
+            /**
+             * Status
+             * @default disabled
+             * @enum {string}
+             */
+            status: "unconfigured" | "unverified" | "disabled" | "skipped" | "success" | "failure";
             /**
              * Host
              * @default
@@ -608,12 +650,37 @@ export interface components {
              * @default teslamate
              */
             topic_prefix: string;
+            test_result?: components["schemas"]["MQTTTestResult"] | null;
+        };
+        /** MQTTTestResult */
+        MQTTTestResult: {
+            /** Version */
+            version: number;
             /**
              * Status
-             * @default disabled
              * @enum {string}
              */
-            status: "unconfigured" | "unverified" | "disabled" | "skipped";
+            status: "success" | "failure";
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "subscription_accepted" | "message_received" | "delivery_accepted" | "disabled" | "skipped" | "unconfigured" | "invalid_credentials" | "unavailable" | "timeout" | "tls_error" | "configuration_changed" | "busy" | "subscription_rejected" | "sender_rejected" | "recipient_rejected" | "message_rejected" | "tls_unavailable" | "protocol_error";
+            /**
+             * Tested At
+             * Format: date-time
+             */
+            tested_at: string;
+            /**
+             * Persisted
+             * @default false
+             */
+            persisted: boolean;
+            /**
+             * Message Received
+             * @default false
+             */
+            message_received: boolean;
         };
         /** Onboarding */
         Onboarding: {
@@ -891,9 +958,15 @@ export interface components {
             version: number;
             /**
              * Test Available
-             * @default false
+             * @default true
              */
             test_available: boolean;
+            /**
+             * Status
+             * @default disabled
+             * @enum {string}
+             */
+            status: "unconfigured" | "unverified" | "disabled" | "skipped" | "success" | "failure";
             /**
              * Host
              * @default
@@ -935,12 +1008,42 @@ export interface components {
              * @default
              */
             sender: string;
+            test_result?: components["schemas"]["SMTPTestResult"] | null;
+        };
+        /** SMTPTestInput */
+        SMTPTestInput: {
+            /** Recipient */
+            recipient: string;
+        };
+        /** SMTPTestResult */
+        SMTPTestResult: {
+            /** Version */
+            version: number;
             /**
              * Status
-             * @default disabled
              * @enum {string}
              */
-            status: "unconfigured" | "unverified" | "disabled" | "skipped";
+            status: "success" | "failure";
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "subscription_accepted" | "message_received" | "delivery_accepted" | "disabled" | "skipped" | "unconfigured" | "invalid_credentials" | "unavailable" | "timeout" | "tls_error" | "configuration_changed" | "busy" | "subscription_rejected" | "sender_rejected" | "recipient_rejected" | "message_rejected" | "tls_unavailable" | "protocol_error";
+            /**
+             * Tested At
+             * Format: date-time
+             */
+            tested_at: string;
+            /**
+             * Persisted
+             * @default false
+             */
+            persisted: boolean;
+            /**
+             * Delivery Accepted
+             * @default false
+             */
+            delivery_accepted: boolean;
         };
         /** SettingsResponse */
         SettingsResponse: {
@@ -1422,6 +1525,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PostgreSQLTestResult"];
+                };
+            };
+        };
+    };
+    test_mqtt_api_v1_settings_mqtt_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MQTTTestResult"];
+                };
+            };
+        };
+    };
+    test_smtp_api_v1_settings_smtp_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SMTPTestInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SMTPTestResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
