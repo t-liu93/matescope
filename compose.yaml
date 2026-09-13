@@ -4,12 +4,16 @@ services:
     image: matescope:local
     environment:
       MATESCOPE_DATA_DIR: /app/data
+      MATESCOPE_PORT: ${MATESCOPE_PORT:-8000}
+      MATESCOPE_PUBLIC_URL: ${MATESCOPE_PUBLIC_URL:-http://localhost:8000}
+      MATESCOPE_COOKIE_SECURE: ${MATESCOPE_COOKIE_SECURE:-true}
+      MATESCOPE_TRUSTED_PROXIES: ${MATESCOPE_TRUSTED_PROXIES:-}
     ports:
-      - "127.0.0.1:${MATESCOPE_PORT:-8000}:8000"
+      - "127.0.0.1:${MATESCOPE_PORT:-8000}:${MATESCOPE_PORT:-8000}"
     volumes:
       - matescope-data:/app/data
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:' + __import__('os').environ.get('MATESCOPE_PORT', '8000') + '/api/v1/health')"]
       interval: 10s
       timeout: 3s
       retries: 3

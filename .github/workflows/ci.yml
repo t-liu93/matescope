@@ -6,6 +6,8 @@ on:
     branches: [main]
 permissions:
   contents: read
+env:
+  MATESCOPE_PUBLIC_URL: http://127.0.0.1:8000
 jobs:
   checks:
     runs-on: ubuntu-latest

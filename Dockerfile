@@ -18,5 +18,5 @@ RUN pip install --no-cache-dir uv==0.11.8 && uv sync --locked --no-dev
 RUN mkdir -p /app/data && chown -R matescope:matescope /app
 USER matescope
 EXPOSE 8000
-HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health')"
-CMD ["/app/.venv/bin/uvicorn", "matescope.main:app", "--host", "0.0.0.0", "--port", "8000"]
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:' + __import__('os').environ.get('MATESCOPE_PORT', '8000') + '/api/v1/health')"
+CMD ["/app/.venv/bin/python", "-m", "matescope"]

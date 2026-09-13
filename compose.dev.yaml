@@ -23,6 +23,9 @@ services:
     image: axllent/mailpit:v1.27.8
     networks: [matescope-dev]
   app:
+    environment:
+      MATESCOPE_PUBLIC_URL: ${MATESCOPE_PUBLIC_URL:-http://localhost:${MATESCOPE_PORT:-8000}}
+      MATESCOPE_COOKIE_SECURE: "false"
     extends:
       file: compose.yaml
       service: app
