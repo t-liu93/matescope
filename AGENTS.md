@@ -16,6 +16,8 @@ Repository: [t-liu93/matescope](https://github.com/t-liu93/matescope). SSH remot
 - Historical data: backend-only access to TeslaMate PostgreSQL using a dedicated read-only account. Optional MQTT supplies the latest vehicle state. Keep MateScope-owned data separate.
 - Initial scope: validate the scaffold and real data access before building the daily-use dashboard.
 
+Start with the [documentation index](docs/README.md), [roadmap](docs/plan/roadmap.md), and relevant milestone. The roadmap owns progress; insights provide background rather than additional agent rules.
+
 ## Language and documentation
 
 - Reply in the user's language. All agent-authored project documentation, including README files, guides, plans, and reports, must have English and Chinese versions.

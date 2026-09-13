@@ -16,6 +16,8 @@ MateScope 是一个自托管、移动端优先的响应式 PWA，用于探索 Te
 - 历史数据：仅后端使用独立只读账号访问 TeslaMate PostgreSQL。可选 MQTT 提供车辆最新状态。MateScope 自身数据独立存储。
 - 初始范围：先验证脚手架和真实数据访问，再构建日常使用的 Dashboard。
 
+从[文档索引](docs/README_zh.md)、[路线图](docs/plan/roadmap_zh.md)及相关里程碑开始阅读。进度由路线图管理；insight 提供背景，而非额外 agent 规则。
+
 ## 语言与文档
 
 - 使用用户的语言回复。所有由 agent 编写的项目文档，包括 README、指南、计划和报告，都必须提供中英双语版本。
