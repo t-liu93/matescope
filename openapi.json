@@ -424,6 +424,422 @@
         }
       }
     },
+    "/api/v1/settings/postgresql/test": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Test Postgresql",
+        "operationId": "test_postgresql_api_v1_settings_postgresql_test_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostgreSQLTestResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/diagnostics": {
+      "get": {
+        "tags": [
+          "history",
+          "operations"
+        ],
+        "summary": "Diagnostics",
+        "operationId": "diagnostics_api_v1_diagnostics_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Diagnostics"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/vehicles": {
+      "get": {
+        "tags": [
+          "history"
+        ],
+        "summary": "Vehicles",
+        "operationId": "vehicles_api_v1_vehicles_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vehicles"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trips": {
+      "get": {
+        "tags": [
+          "history"
+        ],
+        "summary": "Trips",
+        "operationId": "trips_api_v1_trips_get",
+        "parameters": [
+          {
+            "name": "vehicle_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vehicle Id"
+            }
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 2048
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TripPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/charges": {
+      "get": {
+        "tags": [
+          "history"
+        ],
+        "summary": "Charges",
+        "operationId": "charges_api_v1_charges_get",
+        "parameters": [
+          {
+            "name": "vehicle_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vehicle Id"
+            }
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 2048
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChargePage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trips/{trip_id}": {
+      "get": {
+        "tags": [
+          "history"
+        ],
+        "summary": "Trip",
+        "operationId": "trip_api_v1_trips__trip_id__get",
+        "parameters": [
+          {
+            "name": "trip_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Trip Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Trip"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/charges/{charge_id}": {
+      "get": {
+        "tags": [
+          "history"
+        ],
+        "summary": "Charge",
+        "operationId": "charge_api_v1_charges__charge_id__get",
+        "parameters": [
+          {
+            "name": "charge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Charge Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Charge"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trips/{trip_id}/trajectory": {
+      "get": {
+        "tags": [
+          "history"
+        ],
+        "summary": "Trajectory",
+        "operationId": "trajectory_api_v1_trips__trip_id__trajectory_get",
+        "parameters": [
+          {
+            "name": "trip_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Trip Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Trajectory"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/health": {
       "get": {
         "tags": [
@@ -522,6 +938,107 @@
         ],
         "title": "ChangePasswordInput"
       },
+      "Charge": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "vehicle_id": {
+            "type": "integer",
+            "title": "Vehicle Id"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "duration_min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Min"
+          },
+          "energy_added_kwh": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Energy Added Kwh"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "vehicle_id",
+          "start",
+          "end",
+          "duration_min",
+          "energy_added_kwh"
+        ],
+        "title": "Charge"
+      },
+      "ChargePage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Charge"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "End"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor",
+          "start",
+          "end"
+        ],
+        "title": "ChargePage"
+      },
       "CreateAdminInput": {
         "properties": {
           "username": {
@@ -568,6 +1085,18 @@
           "csrf_token"
         ],
         "title": "CsrfResponse"
+      },
+      "Diagnostics": {
+        "properties": {
+          "postgresql": {
+            "$ref": "#/components/schemas/PostgreSQLResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "postgresql"
+        ],
+        "title": "Diagnostics"
       },
       "HTTPValidationError": {
         "properties": {
@@ -701,20 +1230,8 @@
             "title": "Version",
             "default": 0
           },
-          "status": {
-            "type": "string",
-            "enum": [
-              "unconfigured",
-              "unverified",
-              "disabled",
-              "skipped"
-            ],
-            "title": "Status",
-            "default": "disabled"
-          },
           "test_available": {
             "type": "boolean",
-            "const": false,
             "title": "Test Available",
             "default": false
           },
@@ -766,6 +1283,17 @@
             "pattern": "^[^+#\\x00\\r\\n]+$",
             "title": "Topic Prefix",
             "default": "teslamate"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "unconfigured",
+              "unverified",
+              "disabled",
+              "skipped"
+            ],
+            "title": "Status",
+            "default": "disabled"
           }
         },
         "additionalProperties": false,
@@ -827,6 +1355,40 @@
         "additionalProperties": false,
         "type": "object",
         "title": "PasswordChange"
+      },
+      "Point": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Time"
+          },
+          "latitude": {
+            "type": "number",
+            "title": "Latitude"
+          },
+          "longitude": {
+            "type": "number",
+            "title": "Longitude"
+          },
+          "segment_id": {
+            "type": "integer",
+            "title": "Segment Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "time",
+          "latitude",
+          "longitude",
+          "segment_id"
+        ],
+        "title": "Point"
       },
       "PostgreSQLInput": {
         "properties": {
@@ -901,22 +1463,10 @@
             "title": "Version",
             "default": 0
           },
-          "status": {
-            "type": "string",
-            "enum": [
-              "unconfigured",
-              "unverified",
-              "disabled",
-              "skipped"
-            ],
-            "title": "Status",
-            "default": "disabled"
-          },
           "test_available": {
             "type": "boolean",
-            "const": false,
             "title": "Test Available",
-            "default": false
+            "default": true
           },
           "host": {
             "type": "string",
@@ -968,11 +1518,86 @@
             ],
             "title": "Sslmode",
             "default": "prefer"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "unconfigured",
+              "unverified",
+              "disabled",
+              "skipped",
+              "success",
+              "failure"
+            ],
+            "title": "Status",
+            "default": "disabled"
+          },
+          "test_result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PostgreSQLTestResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
         "type": "object",
         "title": "PostgreSQLResponse"
+      },
+      "PostgreSQLTestResult": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "failure"
+            ],
+            "title": "Status"
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "empty_data",
+              "unconfigured",
+              "disabled",
+              "skipped",
+              "invalid_credentials",
+              "unavailable",
+              "timeout",
+              "incompatible_schema",
+              "unsafe_permissions",
+              "insufficient_permissions",
+              "configuration_changed"
+            ],
+            "title": "Code"
+          },
+          "tested_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Tested At"
+          },
+          "persisted": {
+            "type": "boolean",
+            "title": "Persisted",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "version",
+          "status",
+          "code",
+          "tested_at"
+        ],
+        "title": "PostgreSQLTestResult"
       },
       "Preferences": {
         "properties": {
@@ -1130,20 +1755,8 @@
             "title": "Version",
             "default": 0
           },
-          "status": {
-            "type": "string",
-            "enum": [
-              "unconfigured",
-              "unverified",
-              "disabled",
-              "skipped"
-            ],
-            "title": "Status",
-            "default": "disabled"
-          },
           "test_available": {
             "type": "boolean",
-            "const": false,
             "title": "Test Available",
             "default": false
           },
@@ -1199,6 +1812,17 @@
             "pattern": "^(?:[^\\s<>@]+@[^\\s<>@]+)?$",
             "title": "Sender",
             "default": ""
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "unconfigured",
+              "unverified",
+              "disabled",
+              "skipped"
+            ],
+            "title": "Status",
+            "default": "disabled"
           }
         },
         "additionalProperties": false,
@@ -1243,6 +1867,150 @@
           "administrator_exists"
         ],
         "title": "SetupStatus"
+      },
+      "Trajectory": {
+        "properties": {
+          "trip_id": {
+            "type": "integer",
+            "title": "Trip Id"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/Point"
+            },
+            "type": "array",
+            "title": "Points"
+          },
+          "simplified": {
+            "type": "boolean",
+            "title": "Simplified"
+          },
+          "total_points": {
+            "type": "integer",
+            "title": "Total Points"
+          }
+        },
+        "type": "object",
+        "required": [
+          "trip_id",
+          "points",
+          "simplified",
+          "total_points"
+        ],
+        "title": "Trajectory"
+      },
+      "Trip": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "vehicle_id": {
+            "type": "integer",
+            "title": "Vehicle Id"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "duration_min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Min"
+          },
+          "distance_km": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance Km"
+          },
+          "speed_max_kmh": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speed Max Kmh"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "vehicle_id",
+          "start",
+          "end",
+          "duration_min",
+          "distance_km",
+          "speed_max_kmh"
+        ],
+        "title": "Trip"
+      },
+      "TripPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Trip"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "End"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor",
+          "start",
+          "end"
+        ],
+        "title": "TripPage"
       },
       "UserResponse": {
         "properties": {
@@ -1296,6 +2064,59 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "Vehicle": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "model"
+        ],
+        "title": "Vehicle"
+      },
+      "Vehicles": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Vehicle"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "Vehicles"
       }
     }
   }

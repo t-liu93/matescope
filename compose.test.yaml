@@ -1,0 +1,5 @@
+# Explicit, isolated host integration-test access; never part of ordinary preview.
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:${MATESCOPE_TEST_PG_PORT:-15432}:5432"

@@ -118,6 +118,7 @@ export const settingsApi = {
     unwrap(api.PUT("/api/v1/settings/onboarding", { body })),
   postgresql: (body: components["schemas"]["PostgreSQLInput"]) =>
     unwrap(api.PUT("/api/v1/settings/postgresql", { body })),
+  testPostgresql: () => unwrap(api.POST("/api/v1/settings/postgresql/test")),
   mqtt: (body: components["schemas"]["MQTTInput"]) =>
     unwrap(api.PUT("/api/v1/settings/mqtt", { body })),
   smtp: (body: components["schemas"]["SMTPInput"]) =>

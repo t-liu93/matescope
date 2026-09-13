@@ -8,6 +8,7 @@ services:
       POSTGRES_PASSWORD: synthetic-only
     volumes:
       - matescope-postgres:/var/lib/postgresql/data
+      - ./docker/postgres/001-synthetic.sql:/docker-entrypoint-initdb.d/001-synthetic.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U teslamate_admin -d teslamate_synthetic"]
       interval: 5s

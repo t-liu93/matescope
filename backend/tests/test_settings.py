@@ -54,7 +54,8 @@ def test_secret_lifecycle(client: TestClient, section: str) -> None:  # noqa: F8
     current = response[section]
     assert isinstance(current, dict)
     assert current["password_set"] and current["version"] == 1
-    assert current["status"] == "unverified" and current["test_available"] is False
+    assert current["status"] == "unverified"
+    assert current["test_available"] is (section == "postgresql")
     assert secret not in json.dumps(response) and "password" not in current
     with Session(client.app.state.storage.engine) as session:
         record = session.get(ApplicationSettings, 1)
@@ -134,3 +135,67 @@ def test_progress_and_settings_survive_logout_restart(tmp_path: Path) -> None:
         assert edited["mqtt"]["status"] == "unverified"
         assert edited["mqtt"]["version"] == 2
         assert edited["onboarding"]["completed"] is True
+
+
+def test_postgresql_test_auth_csrf_and_unconfigured(client: TestClient) -> None:  # noqa: F811
+    endpoint = "/api/v1/settings/postgresql/test"
+    assert client.post(endpoint, headers=csrf_headers(client)).status_code == 401
+    assert client.get("/api/v1/diagnostics").status_code == 401
+    for path in ("vehicles", "trips", "trips/1", "trips/1/trajectory", "charges", "charges/1"):
+        assert client.get(f"/api/v1/{path}").status_code == 401
+    create_admin(client)
+    headers = csrf_headers(client)
+    for invalid in (
+        {},
+        {**headers, "Origin": "https://evil.example"},
+        {**headers, "X-CSRF-Token": "invalid"},
+    ):
+        assert client.post(endpoint, headers=invalid).status_code == 403
+    result = client.post(endpoint, headers=headers).json()
+    assert result["code"] == "disabled" and result["persisted"]
+    assert client.get("/api/v1/diagnostics").json()["postgresql"]["test_result"] == result
+    current = save(client, "postgresql", {"enabled": True})["postgresql"]
+    assert current["status"] == "unconfigured" and current["test_result"] is None
+    assert client.post(endpoint, headers=headers).json()["code"] == "unconfigured"
+    save(client, "postgresql", {"skipped": True})
+    assert client.post(endpoint, headers=headers).json()["code"] == "skipped"
+    assert client.get("/api/v1/settings").status_code == 200
+    assert client.get("/api/v1/readiness").status_code == 200
+
+
+def test_postgresql_concurrent_save_invalidates_result(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:  # noqa: F811
+    from concurrent.futures import ThreadPoolExecutor
+    from contextlib import contextmanager
+    from threading import Event
+
+    from matescope.postgresql import SourceFailure
+
+    create_admin(client)
+    save(client, "postgresql", {"enabled": True, "host": "synthetic", "username": "reader"})
+    entered, release = Event(), Event()
+
+    @contextmanager
+    def delayed(*args: object) -> Iterator[None]:
+        entered.set()
+        assert release.wait(10)
+        raise SourceFailure("unavailable")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(client.app.state.postgresql, "connection", delayed)
+    headers = csrf_headers(client)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(client.post, "/api/v1/settings/postgresql/test", headers=headers)
+        assert entered.wait(10)
+        try:
+            updated = save(client, "postgresql", {"enabled": False})
+        finally:
+            release.set()
+        result = future.result(timeout=10).json()
+    assert result["code"] == "configuration_changed"
+    assert result["status"] == "failure" and result["persisted"] is False
+    assert result["version"] == 1 and updated["postgresql"]["version"] == 2
+    current = client.get("/api/v1/settings").json()["postgresql"]
+    assert current["status"] == "disabled" and current["test_result"] is None

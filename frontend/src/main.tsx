@@ -48,6 +48,7 @@ type PasswordAction = components["schemas"]["PasswordChange"]["action"];
 type PostgreSQLInput = components["schemas"]["PostgreSQLInput"];
 type MqttInput = components["schemas"]["MQTTInput"];
 type SmtpInput = components["schemas"]["SMTPInput"];
+type PostgreSQLResponse = components["schemas"]["PostgreSQLResponse"];
 const steps: Step[] = ["preferences", "postgresql", "mqtt", "smtp", "review"];
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false, staleTime: 0 } },
@@ -77,6 +78,13 @@ function useSettings() {
 }
 function statusKey(status: string) {
   return `status${status.slice(0, 1).toUpperCase()}${status.slice(1)}`;
+}
+
+function testCodeKey(code: string) {
+  const camelCase = code.replace(/_([a-z])/g, (_, letter: string) =>
+    letter.toUpperCase(),
+  );
+  return `testCode${camelCase.slice(0, 1).toUpperCase()}${camelCase.slice(1)}`;
 }
 
 function LanguageButton() {
@@ -371,6 +379,26 @@ function Connection({
       ...(!skipped && action === "replace" ? { value: password } : {}),
     },
   });
+  const [testResult, setTestResult] = useState(
+    (data as PostgreSQLResponse).test_result ?? null,
+  );
+  const pgData = data as PostgreSQLResponse;
+  const localTestResult =
+    testResult?.version === pgData.version ? testResult : null;
+  const savedTestResult =
+    pgData.test_result?.version === pgData.version ? pgData.test_result : null;
+  const displayedTestResult =
+    testResult?.persisted === false
+      ? testResult
+      : savedTestResult &&
+          localTestResult &&
+          new Date(savedTestResult.tested_at) > new Date(localTestResult.tested_at)
+        ? savedTestResult
+        : localTestResult ?? savedTestResult;
+  const displayedStatus =
+    kind === "postgresql" && displayedTestResult
+      ? displayedTestResult.status
+      : data.status;
   const save = useMutation({
     mutationFn: () =>
       saveConnection(
@@ -381,7 +409,56 @@ function Connection({
       queryClient.setQueryData(["settings"], result);
       setPassword("");
       setAction("retain");
+      if (kind === "postgresql") setTestResult(null);
       afterSave?.();
+    },
+  });
+  const persistedInput =
+    kind === "postgresql"
+      ? {
+          host: pgData.host,
+          username: pgData.username,
+          port: pgData.port,
+          enabled: pgData.enabled,
+          skipped: pgData.skipped,
+          database: pgData.database,
+          sslmode: pgData.sslmode,
+        }
+      : null;
+  const currentInput =
+    kind === "postgresql"
+      ? {
+          host,
+          username,
+          port: Number(port),
+          enabled,
+          skipped: false,
+          database: String(extra.database),
+          sslmode: String(extra.sslmode),
+        }
+      : null;
+  const hasUnsavedChanges =
+    kind === "postgresql" &&
+    (JSON.stringify(currentInput) !== JSON.stringify(persistedInput) ||
+      action !== "retain" ||
+      Boolean(password));
+  const test = useMutation({
+    mutationFn: settingsApi.testPostgresql,
+    onSuccess: async (result) => {
+      setTestResult(result);
+      const refreshed = await settingsApi.get();
+      queryClient.setQueryData(["settings"], refreshed);
+      const confirmed = refreshed.postgresql;
+      if (confirmed) {
+        setHost(confirmed.host);
+        setUsername(confirmed.username);
+        setPort(String(confirmed.port));
+        setEnabled(confirmed.enabled);
+        setExtra({ database: confirmed.database, sslmode: confirmed.sslmode });
+        setAction("retain");
+        setPassword("");
+      }
+      setTestResult(result);
     },
   });
   const skip = useMutation({
@@ -420,6 +497,7 @@ function Connection({
       }
       setAction("retain");
       setPassword("");
+      if (kind === "postgresql") setTestResult(null);
       afterSave?.();
     },
   });
@@ -429,8 +507,18 @@ function Connection({
   return (
     <FormCard title={heading} error={save.error ?? skip.error}>
       <Group justify="space-between">
-        <Badge color={data.status === "unverified" ? "yellow" : "gray"}>
-          {t(statusKey(data.status))}
+        <Badge
+          color={
+            displayedStatus === "success"
+              ? "green"
+              : displayedStatus === "failure"
+                ? "red"
+                : displayedStatus === "unverified"
+                  ? "yellow"
+                  : "gray"
+          }
+        >
+          {t(statusKey(displayedStatus))}
         </Badge>
         <Text size="sm" c="dimmed">
           {data.password_set ? t("passwordSaved") : t("noPassword")}
@@ -441,44 +529,55 @@ function Connection({
           {t("pgHelp")}
         </Text>
       )}
-      <TextInput
-        label={t("host")}
-        value={host}
-        onChange={(e) => setHost(e.currentTarget.value)}
-      />
-      <TextInput
-        label={t("port")}
-        type="number"
-        value={port}
-        onChange={(e) => setPort(e.currentTarget.value)}
-      />
-      <TextInput
-        label={t("username")}
-        value={username}
-        onChange={(e) => setUsername(e.currentTarget.value)}
-      />
-      {kind === "postgresql" && (
-        <>
-          <TextInput
-            label={t("database")}
-            value={String(extra.database)}
-            onChange={(e) => set("database", e.currentTarget.value)}
-          />
-          <Select
-            label={t("sslMode")}
-            value={String(extra.sslmode)}
-            onChange={(v) => set("sslmode", v ?? "prefer")}
-            data={[
-              "disable",
-              "allow",
-              "prefer",
-              "require",
-              "verify-ca",
-              "verify-full",
-            ]}
-          />
-        </>
-      )}
+      <fieldset
+        disabled={test.isPending}
+        style={{
+          border: 0,
+          padding: 0,
+          margin: 0,
+          display: "flex",
+          flexDirection: "column",
+          gap: "var(--mantine-spacing-md)",
+        }}
+      >
+        <TextInput
+          label={t("host")}
+          value={host}
+          onChange={(e) => setHost(e.currentTarget.value)}
+        />
+        <TextInput
+          label={t("port")}
+          type="number"
+          value={port}
+          onChange={(e) => setPort(e.currentTarget.value)}
+        />
+        <TextInput
+          label={t("username")}
+          value={username}
+          onChange={(e) => setUsername(e.currentTarget.value)}
+        />
+        {kind === "postgresql" && (
+          <>
+            <TextInput
+              label={t("database")}
+              value={String(extra.database)}
+              onChange={(e) => set("database", e.currentTarget.value)}
+            />
+            <Select
+              label={t("sslMode")}
+              value={String(extra.sslmode)}
+              onChange={(v) => set("sslmode", v ?? "prefer")}
+              data={[
+                "disable",
+                "allow",
+                "prefer",
+                "require",
+                "verify-ca",
+                "verify-full",
+              ]}
+            />
+          </>
+        )}
       {kind === "mqtt" && (
         <>
           <Checkbox
@@ -539,6 +638,43 @@ function Connection({
               : "smtpHelp",
         )}
       </Alert>
+      {kind === "postgresql" && (
+        <Stack gap="xs">
+          <Button
+            variant="light"
+            onClick={() => test.mutate()}
+            loading={test.isPending}
+            disabled={hasUnsavedChanges}
+          >
+            {test.isPending ? t("testingConnection") : t("testConnection")}
+          </Button>
+          {hasUnsavedChanges && <Text size="sm" c="dimmed">{t("saveFirstToTest")}</Text>}
+          {test.error && <Alert color="red">{errorMessage(test.error, t)}</Alert>}
+          {displayedTestResult && (
+            <Alert
+              color={displayedTestResult.status === "success" ? "green" : "red"}
+            >
+              <Stack gap={2}>
+                <Text fw={600}>
+                  {t(
+                    displayedTestResult.status === "success"
+                      ? "testSuccess"
+                      : "testFailure",
+                  )}
+                </Text>
+                <Text>{t(testCodeKey(displayedTestResult.code))}</Text>
+                <Text size="sm" c="dimmed">
+                  {t("testAt")}: {new Intl.DateTimeFormat(undefined, {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                    timeZone: settings.preferences?.timezone || "UTC",
+                  }).format(new Date(displayedTestResult.tested_at))}
+                </Text>
+              </Stack>
+            </Alert>
+          )}
+        </Stack>
+      )}
       <Group grow>
         <Button onClick={() => save.mutate()} loading={save.isPending}>
           {t("save")}
@@ -551,6 +687,7 @@ function Connection({
           {t("skip")}
         </Button>
       </Group>
+      </fieldset>
     </FormCard>
   );
 }

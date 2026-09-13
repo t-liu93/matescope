@@ -13,6 +13,8 @@ from starlette.responses import Response
 
 from .auth import LoginLimiter, password_hasher, router
 from .config import Settings, settings
+from .data import router as data_router
+from .postgresql import DataSource
 from .settings import router as settings_router
 from .storage import Storage
 
@@ -35,6 +37,7 @@ def create_app(configuration: Settings | None = None) -> FastAPI:
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         application.state.storage = Storage(configuration.data_dir)
         application.state.storage.start()
+        application.state.postgresql = DataSource()
         # Pre-auth CSRF tokens expire on process restart; authenticated sessions persist.
         application.state.csrf_key = secrets.token_bytes(32)
         application.state.login_limiter = LoginLimiter()
@@ -42,6 +45,7 @@ def create_app(configuration: Settings | None = None) -> FastAPI:
         try:
             yield
         finally:
+            application.state.postgresql.close()
             application.state.storage.stop()
 
     application = FastAPI(
@@ -54,6 +58,7 @@ def create_app(configuration: Settings | None = None) -> FastAPI:
     application.state.settings = configuration
     application.include_router(router)
     application.include_router(settings_router)
+    application.include_router(data_router)
 
     @application.middleware("http")
     async def sensitive_cache_policy(

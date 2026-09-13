@@ -225,6 +225,142 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/postgresql/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test Postgresql */
+        post: operations["test_postgresql_api_v1_settings_postgresql_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/diagnostics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Diagnostics */
+        get: operations["diagnostics_api_v1_diagnostics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/vehicles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Vehicles */
+        get: operations["vehicles_api_v1_vehicles_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trips": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Trips */
+        get: operations["trips_api_v1_trips_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/charges": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Charges */
+        get: operations["charges_api_v1_charges_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trips/{trip_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Trip */
+        get: operations["trip_api_v1_trips__trip_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/charges/{charge_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Charge */
+        get: operations["charge_api_v1_charges__charge_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trips/{trip_id}/trajectory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Trajectory */
+        get: operations["trajectory_api_v1_trips__trip_id__trajectory_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -288,6 +424,41 @@ export interface components {
              */
             password_confirmation: string;
         };
+        /** Charge */
+        Charge: {
+            /** Id */
+            id: number;
+            /** Vehicle Id */
+            vehicle_id: number;
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /** End */
+            end: string | null;
+            /** Duration Min */
+            duration_min: number | null;
+            /** Energy Added Kwh */
+            energy_added_kwh: number | null;
+        };
+        /** ChargePage */
+        ChargePage: {
+            /** Items */
+            items: components["schemas"]["Charge"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+        };
         /** CreateAdminInput */
         CreateAdminInput: {
             /** Username */
@@ -307,6 +478,10 @@ export interface components {
         CsrfResponse: {
             /** Csrf Token */
             csrf_token: string;
+        };
+        /** Diagnostics */
+        Diagnostics: {
+            postgresql: components["schemas"]["PostgreSQLResponse"];
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -389,17 +564,10 @@ export interface components {
              */
             version: number;
             /**
-             * Status
-             * @default disabled
-             * @enum {string}
-             */
-            status: "unconfigured" | "unverified" | "disabled" | "skipped";
-            /**
              * Test Available
              * @default false
-             * @constant
              */
-            test_available: false;
+            test_available: boolean;
             /**
              * Host
              * @default
@@ -440,6 +608,12 @@ export interface components {
              * @default teslamate
              */
             topic_prefix: string;
+            /**
+             * Status
+             * @default disabled
+             * @enum {string}
+             */
+            status: "unconfigured" | "unverified" | "disabled" | "skipped";
         };
         /** Onboarding */
         Onboarding: {
@@ -465,6 +639,22 @@ export interface components {
             action: "retain" | "replace" | "clear";
             /** Value */
             value?: string | null;
+        };
+        /** Point */
+        Point: {
+            /** Id */
+            id: number;
+            /**
+             * Time
+             * Format: date-time
+             */
+            time: string;
+            /** Latitude */
+            latitude: number;
+            /** Longitude */
+            longitude: number;
+            /** Segment Id */
+            segment_id: number;
         };
         /** PostgreSQLInput */
         PostgreSQLInput: {
@@ -519,17 +709,10 @@ export interface components {
              */
             version: number;
             /**
-             * Status
-             * @default disabled
-             * @enum {string}
-             */
-            status: "unconfigured" | "unverified" | "disabled" | "skipped";
-            /**
              * Test Available
-             * @default false
-             * @constant
+             * @default true
              */
-            test_available: false;
+            test_available: boolean;
             /**
              * Host
              * @default
@@ -566,6 +749,38 @@ export interface components {
              * @enum {string}
              */
             sslmode: "disable" | "allow" | "prefer" | "require" | "verify-ca" | "verify-full";
+            /**
+             * Status
+             * @default disabled
+             * @enum {string}
+             */
+            status: "unconfigured" | "unverified" | "disabled" | "skipped" | "success" | "failure";
+            test_result?: components["schemas"]["PostgreSQLTestResult"] | null;
+        };
+        /** PostgreSQLTestResult */
+        PostgreSQLTestResult: {
+            /** Version */
+            version: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "success" | "failure";
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "ok" | "empty_data" | "unconfigured" | "disabled" | "skipped" | "invalid_credentials" | "unavailable" | "timeout" | "incompatible_schema" | "unsafe_permissions" | "insufficient_permissions" | "configuration_changed";
+            /**
+             * Tested At
+             * Format: date-time
+             */
+            tested_at: string;
+            /**
+             * Persisted
+             * @default false
+             */
+            persisted: boolean;
         };
         /** Preferences */
         Preferences: {
@@ -675,17 +890,10 @@ export interface components {
              */
             version: number;
             /**
-             * Status
-             * @default disabled
-             * @enum {string}
-             */
-            status: "unconfigured" | "unverified" | "disabled" | "skipped";
-            /**
              * Test Available
              * @default false
-             * @constant
              */
-            test_available: false;
+            test_available: boolean;
             /**
              * Host
              * @default
@@ -727,6 +935,12 @@ export interface components {
              * @default
              */
             sender: string;
+            /**
+             * Status
+             * @default disabled
+             * @enum {string}
+             */
+            status: "unconfigured" | "unverified" | "disabled" | "skipped";
         };
         /** SettingsResponse */
         SettingsResponse: {
@@ -742,6 +956,54 @@ export interface components {
             csrf_token: string;
             /** Administrator Exists */
             administrator_exists: boolean;
+        };
+        /** Trajectory */
+        Trajectory: {
+            /** Trip Id */
+            trip_id: number;
+            /** Points */
+            points: components["schemas"]["Point"][];
+            /** Simplified */
+            simplified: boolean;
+            /** Total Points */
+            total_points: number;
+        };
+        /** Trip */
+        Trip: {
+            /** Id */
+            id: number;
+            /** Vehicle Id */
+            vehicle_id: number;
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /** End */
+            end: string | null;
+            /** Duration Min */
+            duration_min: number | null;
+            /** Distance Km */
+            distance_km: number | null;
+            /** Speed Max Kmh */
+            speed_max_kmh: number | null;
+        };
+        /** TripPage */
+        TripPage: {
+            /** Items */
+            items: components["schemas"]["Trip"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
         };
         /** UserResponse */
         UserResponse: {
@@ -760,6 +1022,20 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** Vehicle */
+        Vehicle: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string | null;
+            /** Model */
+            model: string | null;
+        };
+        /** Vehicles */
+        Vehicles: {
+            /** Items */
+            items: components["schemas"]["Vehicle"][];
         };
     };
     responses: never;
@@ -1117,6 +1393,229 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SettingsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_postgresql_api_v1_settings_postgresql_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PostgreSQLTestResult"];
+                };
+            };
+        };
+    };
+    diagnostics_api_v1_diagnostics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Diagnostics"];
+                };
+            };
+        };
+    };
+    vehicles_api_v1_vehicles_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Vehicles"];
+                };
+            };
+        };
+    };
+    trips_api_v1_trips_get: {
+        parameters: {
+            query?: {
+                vehicle_id?: number | null;
+                start?: string | null;
+                end?: string | null;
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TripPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    charges_api_v1_charges_get: {
+        parameters: {
+            query?: {
+                vehicle_id?: number | null;
+                start?: string | null;
+                end?: string | null;
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChargePage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trip_api_v1_trips__trip_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                trip_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Trip"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    charge_api_v1_charges__charge_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                charge_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Charge"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trajectory_api_v1_trips__trip_id__trajectory_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                trip_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Trajectory"];
                 };
             };
             /** @description Validation Error */

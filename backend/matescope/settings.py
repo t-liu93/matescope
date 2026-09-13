@@ -1,6 +1,7 @@
 """Web-managed instance preferences and connection configuration (no external I/O)."""
 
 import json
+from datetime import UTC, datetime
 from typing import Literal
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -120,12 +121,41 @@ class SMTPInput(SMTPFields):
 class ConnectionState(BaseModel):
     password_set: bool = False
     version: int = 0
-    status: Literal["unconfigured", "unverified", "disabled", "skipped"] = "unconfigured"
-    test_available: Literal[False] = False
+    test_available: bool = False
+
+
+class PostgreSQLTestResult(BaseModel):
+    version: int
+    status: Literal["success", "failure"]
+    code: Literal[
+        "ok",
+        "empty_data",
+        "unconfigured",
+        "disabled",
+        "skipped",
+        "invalid_credentials",
+        "unavailable",
+        "timeout",
+        "incompatible_schema",
+        "unsafe_permissions",
+        "insufficient_permissions",
+        "configuration_changed",
+    ]
+    tested_at: datetime
+    persisted: bool = False
 
 
 class PostgreSQLResponse(PostgreSQLFields, ConnectionState):
-    status: Literal["unconfigured", "unverified", "disabled", "skipped"] = "disabled"
+    status: Literal["unconfigured", "unverified", "disabled", "skipped", "success", "failure"] = (
+        "disabled"
+    )
+    test_available: bool = True
+    test_result: PostgreSQLTestResult | None = None
+
+    @field_validator("test_available", mode="before")
+    @classmethod
+    def supports_test(cls, value: object) -> bool:
+        return True
 
 
 class MQTTResponse(MQTTFields, ConnectionState):
@@ -220,7 +250,7 @@ def save_connection(
             password_set=name in passwords,
             version=getattr(result, name).version + 1,
             status=status,
-            test_available=False,
+            test_available=name == "postgresql",
         )
         response_types: dict[str, type[BaseModel]] = {
             "postgresql": PostgreSQLResponse,
@@ -246,3 +276,37 @@ def save_mqtt(body: MQTTInput, request: Request) -> SettingsResponse:
 @router.put("/smtp", response_model=SettingsResponse, dependencies=[WriteProtection])
 def save_smtp(body: SMTPInput, request: Request) -> SettingsResponse:
     return save_connection("smtp", body, request)
+
+
+@router.post(
+    "/postgresql/test", response_model=PostgreSQLTestResult, dependencies=[WriteProtection]
+)
+def test_postgresql(request: Request) -> PostgreSQLTestResult:
+    from .postgresql import classify, snapshot
+
+    config, password = snapshot(request)
+    code = "ok"
+    try:
+        with request.app.state.postgresql.connection(config, password) as connection:
+            if connection.execute("SELECT id FROM public.cars LIMIT 1").fetchone() is None:
+                code = "empty_data"
+    except Exception as error:
+        code = classify(error)
+    result = PostgreSQLTestResult(
+        version=config.version,
+        status="success" if code in {"ok", "empty_data"} else "failure",
+        code=code,  # type: ignore[arg-type]
+        tested_at=datetime.now(UTC),
+    )
+    with storage(request).transaction() as session:
+        record = record_for_write(request, session)
+        current = SettingsResponse.model_validate_json(record.configuration)
+        if current.postgresql.version != config.version:
+            result.status = "failure"
+            result.code = "configuration_changed"
+            return result
+        result.persisted = True
+        current.postgresql.status = result.status
+        current.postgresql.test_result = result
+        record.configuration = current.model_dump_json()
+    return result
