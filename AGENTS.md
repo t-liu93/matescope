@@ -25,6 +25,9 @@ Start with the [documentation index](docs/README.md), [roadmap](docs/plan/roadma
 - Update each pair in the same change. Directly below each H1, link to the other language. Other documentation links should target the same language where a mirror exists.
 - Do not assume planned files, commands, or features exist. Read the relevant implementation and available design documents before making changes.
 
+- Put temporary implementation notes, per-task walkthroughs, review findings, validation reports, and other intermediate material prepared for the owner under the repository-root `development-notes/` directory. Ignore the entire directory in Git and Docker build contexts; never force-add, commit, or copy those notes into tracked documentation. Keep their English/Chinese pairs together there.
+- Keep tracked documentation focused on stable project information, agreed plans, and concise roadmap progress. A task completing or a note containing useful commands does not make it permanent documentation; promote material into tracked docs only when the user explicitly requests it. Put detailed per-task execution/review evidence in `development-notes/`, not README files or milestone plans.
+
 ## Working rules
 
 - Implement the requested scope in small, reviewable changes. Preserve unrelated user work and avoid speculative abstractions or refactors.
@@ -73,4 +76,4 @@ Single-agent work is the default. Start a delegated implementation/review loop o
 
 ## Maintaining this guide
 
-Update both language versions when stable decisions change. Keep milestone status, transient research, machine-specific paths, and other repositories' instructions out of this guide. Add verified development commands when the scaffold exists.
+Update both language versions when stable decisions change. Keep milestone status, transient research, machine-specific paths, and other repositories' instructions out of this guide. Keep temporary development commands and execution evidence in `development-notes/`; do not link stable guidance to ignored local files.

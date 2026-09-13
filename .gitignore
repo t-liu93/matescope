@@ -65,3 +65,4 @@ Thumbs.db
 
 # Dependency lockfiles, migrations, generated API contracts, and synthetic
 # fixtures belong in Git; do not add blanket ignore rules for them.
+/development-notes/

@@ -8,9 +8,9 @@ TeslaMate continues collecting vehicle data. MateScope will read historical data
 
 ## Status
 
-Early planning; there is no runnable application or published container image yet. The first milestone will validate the application scaffold and real data access before expanding the dashboard.
+Implementation and verification progress is tracked in the [roadmap](docs/plan/roadmap.md).
 
-The technology direction is React + TypeScript + Vite on the frontend and Python + FastAPI on the backend. Supporting libraries and architecture are tracked in the [roadmap](docs/plan/roadmap.md). Setup instructions will be added after they are verified.
+The technology direction is React + TypeScript + Vite on the frontend and Python + FastAPI on the backend. Supporting libraries and architecture are tracked in the [roadmap](docs/plan/roadmap.md).
 
 ## Documentation
 

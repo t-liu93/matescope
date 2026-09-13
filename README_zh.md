@@ -8,9 +8,9 @@ TeslaMate 继续负责采集车辆数据。MateScope 将通过后端使用独立
 
 ## 状态
 
-目前处于早期规划阶段，尚无可运行的应用或已发布的容器镜像。第一个里程碑将验证应用脚手架和真实数据访问，再扩展 Dashboard。
+实现与验证进度在[路线图](docs/plan/roadmap_zh.md)中跟踪。
 
-技术方向是前端 React + TypeScript + Vite，后端 Python + FastAPI。配套库和架构在[路线图](docs/plan/roadmap_zh.md)中跟踪。安装说明将在验证后补充。
+技术方向是前端 React + TypeScript + Vite，后端 Python + FastAPI。配套库和架构在[路线图](docs/plan/roadmap_zh.md)中跟踪。
 
 ## 文档
 

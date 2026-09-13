@@ -1,0 +1,47 @@
+{
+  "name": "matescope-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.7.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:smoke": "playwright test",
+    "generate:api": "uv run --project .. python ../scripts/export_openapi.py && openapi-typescript ../openapi.json -o src/api/schema.d.ts"
+  },
+  "dependencies": {
+    "@mantine/core": "8.3.10",
+    "@mantine/hooks": "8.3.10",
+    "@tanstack/react-query": "5.90.5",
+    "i18next": "25.6.0",
+    "openapi-fetch": "0.15.0",
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
+    "react-i18next": "16.1.0",
+    "react-router-dom": "7.9.4"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.37.0",
+    "@playwright/test": "1.57.0",
+    "@testing-library/jest-dom": "6.8.0",
+    "@testing-library/react": "16.3.0",
+    "@typescript-eslint/parser": "8.46.0",
+    "@types/node": "24.7.2",
+    "@types/react": "19.1.16",
+    "@types/react-dom": "19.1.9",
+    "@vitejs/plugin-react": "6.1.1",
+    "eslint": "9.37.0",
+    "eslint-plugin-react-hooks": "6.1.0",
+    "eslint-plugin-react-refresh": "0.4.24",
+    "globals": "16.4.0",
+    "jsdom": "27.0.0",
+    "openapi-typescript": "7.9.1",
+    "typescript": "5.9.3",
+    "vite": "8.3.0",
+    "vitest": "3.2.4"
+  }
+}

@@ -1,0 +1,43 @@
+name: matescope-dev
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_DB: teslamate_synthetic
+      POSTGRES_USER: teslamate_admin
+      POSTGRES_PASSWORD: synthetic-only
+    volumes:
+      - matescope-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U teslamate_admin -d teslamate_synthetic"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [matescope-dev]
+  mqtt:
+    image: eclipse-mosquitto:2.0.22
+    volumes:
+      - ./docker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    networks: [matescope-dev]
+  mail:
+    image: axllent/mailpit:v1.27.8
+    networks: [matescope-dev]
+  app:
+    extends:
+      file: compose.yaml
+      service: app
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres: { condition: service_healthy }
+      mqtt: { condition: service_started }
+      mail: { condition: service_started }
+    networks: [matescope-dev]
+
+volumes:
+  matescope-data:
+  matescope-postgres:
+
+networks:
+  matescope-dev:

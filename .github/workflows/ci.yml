@@ -1,0 +1,56 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.13' }
+      - uses: astral-sh/setup-uv@v6
+        with: { version: '0.11.8' }
+      - uses: pnpm/action-setup@v4
+        with: { version: '11.7.0' }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22.23.1', cache: pnpm, cache-dependency-path: frontend/pnpm-lock.yaml }
+      - run: uv sync --locked
+      - run: uv run ruff check backend
+      - run: uv run mypy backend/matescope
+      - run: uv run pytest
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - run: pnpm --dir frontend rebuild esbuild --config.ignore-scripts=false
+      - run: pnpm --dir frontend exec playwright install --with-deps chromium
+      - run: uv run python scripts/export_openapi.py
+      - run: pnpm --dir frontend generate:api
+      - run: git diff --exit-code -- openapi.json frontend/src/api/schema.d.ts
+      - run: pnpm --dir frontend lint
+      - run: pnpm --dir frontend typecheck
+      - run: pnpm --dir frontend test
+      - run: pnpm --dir frontend build
+      - run: docker compose -f compose.yaml -f compose.dev.yaml config --quiet
+      - run: docker build --tag matescope:ci .
+      - run: docker compose -p matescope-ci -f compose.yaml -f compose.dev.yaml up --build --detach
+      - run: timeout 90 sh -c 'until curl --fail http://127.0.0.1:8000/api/v1/health && curl --fail http://127.0.0.1:8000/api/v1/readiness && curl --fail http://127.0.0.1:8000/ | grep -q MateScope; do sleep 2; done'
+      - run: PLAYWRIGHT_BASE_URL=http://127.0.0.1:8000 pnpm --dir frontend test:smoke
+      - if: always()
+        run: mkdir -p ci-artifacts && docker compose -p matescope-ci -f compose.yaml -f compose.dev.yaml logs --no-color > ci-artifacts/compose.log || true
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compose-logs
+          path: ci-artifacts/compose.log
+          if-no-files-found: ignore
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-test-results
+          path: frontend/test-results
+          if-no-files-found: ignore
+      - if: always()
+        run: docker compose -p matescope-ci -f compose.yaml -f compose.dev.yaml down --volumes || true
