@@ -46,6 +46,9 @@ jobs:
       - run: PLAYWRIGHT_BASE_URL=http://127.0.0.1:8000 pnpm --dir frontend test:smoke
         env:
           MATESCOPE_E2E_REAL_PG: '1'
+      - run: python scripts/check_recovery.py --project matescope-ci --port 8000
+        env:
+          MATESCOPE_TEST_RECOVERY: matescope-synthetic-m0-t07
       - if: always()
         run: mkdir -p ci-artifacts && docker compose -p matescope-ci -f compose.yaml -f compose.dev.yaml logs --no-color > ci-artifacts/compose.log || true
       - if: always()

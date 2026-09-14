@@ -14,6 +14,7 @@ RUN groupadd --system matescope && useradd --system --gid matescope --home-dir /
 COPY --from=frontend-build /src/frontend/dist /app/frontend/dist
 COPY backend /app/backend
 COPY pyproject.toml uv.lock /app/
+COPY --chmod=755 scripts/matescope /usr/local/bin/matescope
 RUN pip install --no-cache-dir uv==0.11.8 && uv sync --locked --no-dev
 RUN mkdir -p /app/data && chown -R matescope:matescope /app
 USER matescope

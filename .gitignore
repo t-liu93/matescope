@@ -46,6 +46,7 @@ test-results/
 *.sqlite3-*
 *.dump
 *.backup
+*.matescope.zip
 *.log
 
 # Machine-local agent state and scratch reports.
