@@ -1,7 +1,7 @@
 name: matescope
 services:
   app:
-    image: matescope:local
+    image: ${MATESCOPE_IMAGE:-matescope:local}
     environment:
       MATESCOPE_DATA_DIR: /app/data
       MATESCOPE_PORT: ${MATESCOPE_PORT:-8000}

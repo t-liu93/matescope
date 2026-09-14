@@ -168,6 +168,7 @@ def main() -> None:
             "env",
             f"MATESCOPE_PORT={args.port}",
             f"MATESCOPE_PUBLIC_URL={source_base}",
+            f"MATESCOPE_IMAGE={inspected['Config']['Image']}",
             *compose,
             "up",
             "-d",

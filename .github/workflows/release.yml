@@ -1,0 +1,185 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+# Checks need only repository contents.  The sole publishing job narrows its
+# additional privilege to packages:write.
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/t-liu93/matescope
+
+jobs:
+  validate-tag:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      image_tag: ${{ steps.version.outputs.image_tag }}
+      source_sha: ${{ steps.source.outputs.value }}
+      stable: ${{ steps.version.outputs.stable }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The event SHA is immutable for this run; the tag ref itself can
+          # be moved after the event is queued.
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Validate strict semantic version tag
+        id: version
+        run: |
+          python scripts/check_release_tag.py --self-test
+          python scripts/check_release_tag.py "$GITHUB_REF_NAME" --github-output "$GITHUB_OUTPUT"
+      - name: Record tag target commit
+        id: source
+        run: echo "value=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  full-checks:
+    needs: validate-tag
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.validate-tag.outputs.source_sha }}
+
+  build-and-test:
+    needs: [validate-tag, full-checks]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux/amd64
+            architecture: amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            architecture: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate-tag.outputs.source_sha }}
+      - uses: docker/setup-buildx-action@v4
+      - name: Build the release candidate for this native platform
+        env:
+          VERSION: ${{ needs.validate-tag.outputs.version }}
+          IMAGE_TAG: ${{ needs.validate-tag.outputs.image_tag }}
+          SOURCE_SHA: ${{ needs.validate-tag.outputs.source_sha }}
+          PLATFORM: ${{ matrix.platform }}
+          ARCH: ${{ matrix.architecture }}
+        run: |
+          docker buildx build --platform "$PLATFORM" --load \
+            --tag "matescope:release-$ARCH" \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=$SOURCE_SHA" \
+            --label "org.opencontainers.image.version=$VERSION" .
+      - name: Run critical operations against the tested image
+        env:
+          MATESCOPE_TEST_IMAGE: matescope-synthetic-m0-t08
+        run: python scripts/check_image.py --image matescope:release-${{ matrix.architecture }} --platform ${{ matrix.platform }}
+      - name: Save exactly the tested image
+        run: docker save --output "$RUNNER_TEMP/matescope-${{ matrix.architecture }}.tar" matescope:release-${{ matrix.architecture }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-image-${{ matrix.architecture }}
+          path: ${{ runner.temp }}/matescope-${{ matrix.architecture }}.tar
+          if-no-files-found: error
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-runtime-log-${{ matrix.architecture }}
+          path: ci-artifacts/image-${{ matrix.architecture }}.log
+          if-no-files-found: warn
+          retention-days: 1
+
+  publish:
+    # Forks may exercise tag validation and checks, but can never publish to
+    # the canonical package.  No external deployment or SSH operation exists.
+    if: github.repository == 't-liu93/matescope'
+    needs: [validate-tag, full-checks, build-and-test]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-image-*
+          path: ${{ runner.temp }}/release-images
+          merge-multiple: true
+      - name: Load tested platform images
+        run: |
+          docker load --input "$RUNNER_TEMP/release-images/matescope-amd64.tar"
+          docker load --input "$RUNNER_TEMP/release-images/matescope-arm64.tar"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push tested platform images and create manifests
+        id: publish
+        env:
+          VERSION: ${{ needs.validate-tag.outputs.version }}
+          IMAGE_TAG: ${{ needs.validate-tag.outputs.image_tag }}
+          SOURCE_SHA: ${{ needs.validate-tag.outputs.source_sha }}
+          STABLE: ${{ needs.validate-tag.outputs.stable }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+            internal_tag="build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${arch}"
+            docker tag "matescope:release-$arch" "$IMAGE:$internal_tag"
+            docker push "$IMAGE:$internal_tag"
+            digest=$(docker buildx imagetools inspect "$IMAGE:$internal_tag" --format '{{.Manifest.Digest}}')
+            printf -v "${arch}_digest" '%s' "$digest"
+          done
+          tags=(-t "$IMAGE:$IMAGE_TAG" -t "$IMAGE:sha-$SOURCE_SHA")
+          if [[ "$STABLE" == true ]]; then
+            tags+=(-t "$IMAGE:latest")
+          fi
+          docker buildx imagetools create "${tags[@]}" \
+            "$IMAGE@$amd64_digest" "$IMAGE@$arm64_digest"
+          digest=$(docker buildx imagetools inspect "$IMAGE:$IMAGE_TAG" --format '{{.Manifest.Digest}}')
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - name: Check anonymous pull access
+        id: anonymous-pull
+        env:
+          VERSION: ${{ needs.validate-tag.outputs.version }}
+          IMAGE_TAG: ${{ needs.validate-tag.outputs.image_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker logout ghcr.io || true
+          if docker pull "$IMAGE:$IMAGE_TAG"; then
+            echo 'result=passed' >> "$GITHUB_OUTPUT"
+          else
+            echo 'result=manual visibility action required' >> "$GITHUB_OUTPUT"
+            echo "::warning::Anonymous GHCR pull failed. The first package is private by default; set its visibility to public in the package settings, then retry this pull."
+          fi
+      - name: Write release summary
+        env:
+          VERSION: ${{ needs.validate-tag.outputs.version }}
+          IMAGE_TAG: ${{ needs.validate-tag.outputs.image_tag }}
+          SOURCE_SHA: ${{ needs.validate-tag.outputs.source_sha }}
+          DIGEST: ${{ steps.publish.outputs.digest }}
+          ANONYMOUS_PULL: ${{ steps.anonymous-pull.outputs.result }}
+        run: |
+          {
+            echo '## Published image'
+            echo
+            echo "- Source commit: \`$SOURCE_SHA\`"
+            echo "- Version: \`$VERSION\`"
+            echo "- OCI image tag: \`$IMAGE_TAG\`"
+            echo "- Manifest digest: \`$DIGEST\`"
+            echo "- Anonymous pull check: $ANONYMOUS_PULL"
+            echo
+            echo '```sh'
+            echo "docker pull $IMAGE:$IMAGE_TAG"
+            echo "docker pull $IMAGE@$DIGEST"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Require anonymous package pull access
+        if: steps.anonymous-pull.outputs.result != 'passed'
+        run: exit 1

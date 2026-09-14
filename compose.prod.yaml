@@ -1,0 +1,13 @@
+services:
+  app:
+    image: ${MATESCOPE_IMAGE:?Set MATESCOPE_IMAGE to a published GHCR version or digest}
+    environment:
+      MATESCOPE_PUBLIC_URL: ${MATESCOPE_PUBLIC_URL:?Set the browser-visible HTTPS origin}
+      MATESCOPE_COOKIE_SECURE: "true"
+    networks:
+      - teslamate
+
+networks:
+  teslamate:
+    external: true
+    name: ${TESLAMATE_NETWORK:?Set the existing TeslaMate Docker network name}
