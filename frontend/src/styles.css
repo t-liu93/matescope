@@ -1,2 +1,5 @@
 :root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
 body { margin: 0; min-width: 320px; background: light-dark(#f8f9fa, #141517); }
+.trajectory-map { height: min(52vh, 420px); min-height: 240px; width: 100%; }
+.shell-header { padding-inline: 8px; }
+.shell-header-actions .mantine-Button-root { height: 32px; min-height: 32px; padding-inline: 6px; }

@@ -127,3 +127,44 @@ export const settingsApi = {
   testSmtp: (body: components["schemas"]["SMTPTestInput"]) =>
     unwrap(api.POST("/api/v1/settings/smtp/test", { body })),
 };
+
+export type HistoryWindow = {
+  vehicleId?: number;
+  start: string;
+  end: string;
+  cursor?: string;
+};
+
+function historyQuery(window: HistoryWindow) {
+  return {
+    params: {
+      query: {
+        vehicle_id: window.vehicleId,
+        start: window.start,
+        end: window.end,
+        limit: 50,
+        cursor: window.cursor,
+      },
+    },
+  };
+}
+
+export const historyApi = {
+  vehicles: () => unwrap(api.GET("/api/v1/vehicles")),
+  trips: (window: HistoryWindow) =>
+    unwrap(api.GET("/api/v1/trips", historyQuery(window))),
+  charges: (window: HistoryWindow) =>
+    unwrap(api.GET("/api/v1/charges", historyQuery(window))),
+  trip: (tripId: number) =>
+    unwrap(api.GET("/api/v1/trips/{trip_id}", { params: { path: { trip_id: tripId } } })),
+  charge: (chargeId: number) =>
+    unwrap(api.GET("/api/v1/charges/{charge_id}", {
+      params: { path: { charge_id: chargeId } },
+    })),
+  trajectory: (tripId: number) =>
+    unwrap(
+      api.GET("/api/v1/trips/{trip_id}/trajectory", {
+        params: { path: { trip_id: tripId } },
+      }),
+    ),
+};

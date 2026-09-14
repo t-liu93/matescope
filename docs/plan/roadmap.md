@@ -33,7 +33,7 @@ Confirmed direction: a self-hosted, responsive React PWA with independent authen
 
 | Milestone | Outcome | Status |
 | --- | --- | --- |
-| [M0](milestones/M0.md) | Local Compose preview, web onboarding, read-only data, backup/restore, CI and dual-platform release, VPS acceptance | T01–T05 implemented and locally validated; T06–T09 pending |
+| [M0](milestones/M0.md) | Local Compose preview, web onboarding, read-only data, backup/restore, CI and dual-platform release, VPS acceptance | T01–T06 implemented and locally validated; T07–T09 pending |
 | M1 | Daily-use overview, trip and charging flows, responsive navigation and installable PWA | Proposed; detail after M0 |
 | M2 | Coverage inventory and prioritized statistics: efficiency, range/battery, parking drain, locations | Proposed; detail after M1 |
 | M3 | Additional comparisons, activity timeline, and performance/usability improvements based on use | Proposed; scope not committed |

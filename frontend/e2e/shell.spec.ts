@@ -1,8 +1,10 @@
 import { expect, test } from "@playwright/test";
+import { clickAuthenticatedAction } from "./auth-helper";
 
 const credentials = { username: "m0-t03-admin", password: "m0-t03-password" };
 
 test("onboarding saves, resumes, skips and supports later editing", async ({ page }, info) => {
+  test.setTimeout(150_000);
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("/login");
@@ -11,7 +13,11 @@ test("onboarding saves, resumes, skips and supports later editing", async ({ pag
   await page.getByLabel(/^Username(?:\s*\*)?$/).fill(credentials.username);
   await page.getByLabel(/^Password(?:\s*\*)?$/).fill(credentials.password);
   if (creating) await page.getByLabel(/^Confirm password(?:\s*\*)?$/).fill(credentials.password);
-  await page.getByRole("button", { name: creating ? "Create administrator" : "Sign in", exact: true }).click();
+  await clickAuthenticatedAction(
+    page,
+    creating ? "/api/v1/setup/administrator" : "/api/v1/auth/login",
+    () => page.getByRole("button", { name: creating ? "Create administrator" : "Sign in", exact: true }).click(),
+  );
   await expect(page).not.toHaveURL(/\/login$/);
   const settingsResponse = await page.request.get("/api/v1/settings");
   expect(settingsResponse.ok()).toBe(true);
@@ -50,7 +56,11 @@ test("onboarding saves, resumes, skips and supports later editing", async ({ pag
     await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
     await page.getByLabel(/^Username(?:\s*\*)?$/).fill(credentials.username);
     await page.getByLabel(/^Password(?:\s*\*)?$/).fill(credentials.password);
-    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await clickAuthenticatedAction(
+      page,
+      "/api/v1/auth/login",
+      () => page.getByRole("button", { name: "Sign in", exact: true }).click(),
+    );
     await expect(page.getByRole("heading", { name: "MQTT", exact: true })).toBeVisible();
   }
   await page.getByRole("button", { name: "Skip for now", exact: true }).click();
@@ -101,7 +111,11 @@ test("onboarding saves, resumes, skips and supports later editing", async ({ pag
     await page.getByLabel("Current password", { exact: true }).fill(credentials.password);
     await page.getByLabel("New password", { exact: true }).fill(credentials.password);
     await page.getByLabel(/^Confirm password(?:\s*\*)?$/).fill(credentials.password);
-    await page.getByRole("button", { name: "Update password", exact: true }).click();
+    await clickAuthenticatedAction(
+      page,
+      "/api/v1/auth/password",
+      () => page.getByRole("button", { name: "Update password", exact: true }).click(),
+    );
   } else {
     await page.getByRole("button", { name: "Sign out", exact: true }).click();
   }

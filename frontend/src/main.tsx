@@ -11,6 +11,7 @@ import {
   Container,
   Group,
   MantineProvider,
+  Menu,
   Paper,
   PasswordInput,
   Select,
@@ -39,6 +40,13 @@ import {
 } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ApiError, authApi, setCsrf, settingsApi } from "./api/client";
+import {
+  ChargeDetailPage,
+  ChargesPage,
+  TripDetailPage,
+  TripsPage,
+  VehiclesPage,
+} from "./history";
 import type { components } from "./api/schema";
 import i18n from "./i18n";
 
@@ -949,6 +957,11 @@ function Landing() {
       <Stack>
         <Title order={1}>{t("setupComplete")}</Title>
         <Text c="dimmed">{t("setupLanding")}</Text>
+        <Group grow>
+          <Button component={Link} to="/vehicles" variant="light">{t("vehicles")}</Button>
+          <Button component={Link} to="/trips" variant="light">{t("trips")}</Button>
+          <Button component={Link} to="/charges" variant="light">{t("charges")}</Button>
+        </Group>
         <Button component={Link} to="/settings">
           {t("editSettings")}
         </Button>
@@ -1100,10 +1113,20 @@ function Shell() {
     <AppShell header={showHeader ? { height: 60 } : undefined}>
       {showHeader && (
         <AppShell.Header>
-          <Container size="sm" h="100%">
-            <Group justify="space-between" h="100%">
+          <Container size="sm" h="100%" className="shell-header">
+            <Group justify="space-between" h="100%" wrap="nowrap" gap={4}>
               <Text fw={700}>{t("appName")}</Text>
-              <Group gap="xs">
+              <Group gap={2} wrap="nowrap" className="shell-header-actions">
+                <Menu shadow="md" width={160} position="bottom-end">
+                  <Menu.Target>
+                    <Button variant="subtle" aria-label={t("navigation")}>{t("menu")}</Button>
+                  </Menu.Target>
+                  <Menu.Dropdown>
+                    <Menu.Item component={Link} to="/vehicles">{t("vehicles")}</Menu.Item>
+                    <Menu.Item component={Link} to="/trips">{t("trips")}</Menu.Item>
+                    <Menu.Item component={Link} to="/charges">{t("charges")}</Menu.Item>
+                  </Menu.Dropdown>
+                </Menu>
                 <Button component={Link} to="/settings" variant="subtle">
                   {t("settings")}
                 </Button>
@@ -1140,6 +1163,11 @@ function Shell() {
               </Protected>
             }
           />
+          <Route path="/vehicles" element={<Protected><VehiclesPage /></Protected>} />
+          <Route path="/trips" element={<Protected><TripsPage /></Protected>} />
+          <Route path="/trips/:id" element={<Protected><TripDetailPage /></Protected>} />
+          <Route path="/charges" element={<Protected><ChargesPage /></Protected>} />
+          <Route path="/charges/:id" element={<Protected><ChargeDetailPage /></Protected>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AppShell.Main>

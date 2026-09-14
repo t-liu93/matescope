@@ -44,6 +44,8 @@ jobs:
       - run: docker compose -p matescope-ci -f compose.yaml -f compose.dev.yaml up --build --detach
       - run: timeout 90 sh -c 'until curl --fail http://127.0.0.1:8000/api/v1/health && curl --fail http://127.0.0.1:8000/api/v1/readiness && curl --fail http://127.0.0.1:8000/ | grep -q MateScope; do sleep 2; done'
       - run: PLAYWRIGHT_BASE_URL=http://127.0.0.1:8000 pnpm --dir frontend test:smoke
+        env:
+          MATESCOPE_E2E_REAL_PG: '1'
       - if: always()
         run: mkdir -p ci-artifacts && docker compose -p matescope-ci -f compose.yaml -f compose.dev.yaml logs --no-color > ci-artifacts/compose.log || true
       - if: always()
