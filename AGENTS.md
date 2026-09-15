@@ -20,12 +20,12 @@ Start with the [documentation index](docs/README.md), [roadmap](docs/plan/roadma
 
 ## Language and documentation
 
-- Reply in the user's language. All agent-authored project documentation, including README files, guides, plans, and reports, must have English and Chinese versions.
+- Reply in the user's language. Tracked agent-authored project documentation, including README files, guides, and plans, must have English and Chinese versions. Local material in `development-notes/`, including step implementation/review/fix reports and milestone implementation reports, is written in Chinese only; no English mirror or language-pair link is required.
 - English is the single source of truth. Keep the original English filename and insert `_zh` before the extension for its faithful Chinese mirror: `README.md` / `README_zh.md`, `AGENTS.md` / `AGENTS_zh.md`, or `plan.md` / `plan_zh.md`. If versions disagree, English takes precedence; translations must not introduce independent rules.
 - Update each pair in the same change. Directly below each H1, link to the other language. Other documentation links should target the same language where a mirror exists.
 - Do not assume planned files, commands, or features exist. Read the relevant implementation and available design documents before making changes.
 
-- Put temporary implementation notes, per-task walkthroughs, review findings, validation reports, and other intermediate material prepared for the owner under the repository-root `development-notes/` directory. Ignore the entire directory in Git and Docker build contexts; never force-add, commit, or copy those notes into tracked documentation. Keep their English/Chinese pairs together there.
+- Put temporary implementation notes, per-task walkthroughs, review findings, validation reports, and other intermediate material prepared for the owner under the repository-root `development-notes/` directory. Ignore the entire directory in Git and Docker build contexts; never force-add, commit, or copy those notes into tracked documentation. These local reports serve both cold-start agents and the owner’s manual inspection.
 - Keep tracked documentation focused on stable project information, agreed plans, and concise roadmap progress. A task completing or a note containing useful commands does not make it permanent documentation; promote material into tracked docs only when the user explicitly requests it. Put detailed per-task execution/review evidence in `development-notes/`, not README files or milestone plans.
 
 ## Working rules
@@ -48,7 +48,7 @@ Start with the [documentation index](docs/README.md), [roadmap](docs/plan/roadma
 - **Wrap up:** after review and integration checks pass, combine the step's implementation and fixups into one commit before proceeding. For a step with a preceding commit, use `GIT_SEQUENCE_EDITOR=true git rebase -i --autosquash <preceding-sha>`. For a root implementation commit, use `GIT_SEQUENCE_EDITOR=true git rebase -i --autosquash --root` only after verifying the affected history belongs to that step.
 - Autosquash folds fixups into their targets; it does not combine multiple ordinary implementation commits. If a step has several such commits, explicitly arrange a non-interactive rebase todo to squash only that step's commits. Preserve commits belonging to other steps or contributors.
 - Before rewriting, verify a clean worktree, exact commit boundaries, and that all affected commits are unpublished. Never automatically rewrite already-pushed history or force-push. If rewriting is not authorized, preserve history and use follow-up commits.
-- At milestone completion, retain one commit per completed step, not a single squash of the entire milestone. Report completed work, verification, and remaining manual walkthrough steps in bilingual documentation when producing a written report.
+- At milestone completion, retain one commit per completed step, not a single squash of the entire milestone. Produce a Chinese-only milestone implementation report in `development-notes/`, covering completed and pending work, verification, limitations, and manual walkthrough steps with expected results. Never describe pending acceptance as completed.
 
 ## Agent orchestration
 
@@ -66,13 +66,20 @@ Single-agent work is the default. Start a delegated implementation/review loop o
 - Give Luna bounded tasks with concrete acceptance criteria. Escalate implementation/fixes to `gpt-5.6-terra` with `medium`, or Astra for harder work, when complexity or repeated failures warrants it. Route authentication boundaries, database permissions, and ambiguous statistical logic to a stronger model from the start when appropriate.
 - Use actual harness model/effort settings, not role names in prompts. If unavailable, disclose the limitation and use a supported alternative consistent with the user's preferences. Do not claim to have changed the parent session's model unless the harness actually did so.
 
+### Reports and cold-start handoff
+
+- For every atomic step, save an implementation report after implementation, a review report after each review round, and a fix report after each repair round, before handing off. Use `development-notes/<milestone>/<step>/implementation-report.md`, `review-report-r<N>.md`, and `fix-report-r<N>.md`; write all contents in Chinese and retain each round. Save the milestone implementation report at `development-notes/<milestone>/implementation-report.md`.
+- Reports are the sole acceptance and handoff record. Together with the corresponding code diff, they are the only task-specific inputs to cold-start reviewers and fixers; do not pass conversation history, oral summaries, or the orchestrator’s preferred verdict. Repository rules still apply, and agents must inspect relevant code and independently verify report claims. Put the agreed scope and acceptance criteria in the report so the next agent needs no prior conversation.
+- An implementation report records the step ID, scope/exclusions, acceptance criteria, changes/files, preceding and implementation SHAs, exact diff boundaries, checks and outcomes, unrun checks, limitations, and manual verification. A review report identifies the reviewed SHAs and records each finding’s ID, priority, location, reproduction/evidence, expected behavior, and required correction, plus independent checks and the acceptance verdict; explicitly state when there are no actionable findings. A fix report maps each finding to its correction, fixup SHA/diff, validation, and unresolved items.
+- A fresh reviewer receives the implementation report, any subsequent review/fix reports, and the cumulative step diff. A fresh fixer receives those reports, the latest actionable review report, and the corresponding cumulative/repair diffs. Missing or stale scope, evidence, or commit boundaries must be corrected in the reports before handoff. After squash, record the final SHA and old-to-new mapping so later acceptance uses the actual current diff.
+
 ### Delegated workflow
 
 1. Define a bounded task, acceptance criteria, relevant files, and required checks. Parallelize only independent work with clear file ownership.
-2. The implementer completes that task, runs required checks, creates the implementation commit, and reports changes, checks, limitations, and the commit SHA. The orchestrator owns Git mutations when agents share a worktree; do not run concurrent commits or rebases there.
-3. A fresh reviewer receives the requirements, diff, and factual implementation report, without the implementer's conversation or the orchestrator's preferred verdict. Review the code and independently verify critical behavior.
-4. A fixer addresses actionable findings and creates a fixup for that step's implementation commit; a fresh reviewer reviews the revised result again. Escalate after two unsuccessful attempts at the same issue rather than repeating unchanged instructions. After five repair rounds, stop the loop and report unresolved findings to the user.
-5. Once no actionable findings remain, the orchestrator verifies integration, performs the authorized per-step squash, verifies the resulting diff and history, and reports the result before advancing to the next task. Review supplements testing; it does not replace it.
+2. The implementer completes the task and required checks; create the implementation commit and Chinese implementation report before review. The orchestrator owns Git mutations when agents share a worktree; do not run concurrent commits or rebases there.
+3. A cold-start reviewer uses the report-and-diff handoff above, inspects the code, independently verifies critical behavior, and writes a Chinese review report.
+4. A cold-start fixer addresses the review report’s actionable findings, creates a fixup for the step’s implementation commit, and writes a Chinese fix report. A fresh reviewer reviews the revised reports and diff and records the next review round. Escalate after two unsuccessful attempts at the same issue rather than repeating unchanged instructions. After five repair rounds, stop the loop and report unresolved findings to the user.
+5. Once no actionable findings remain, the orchestrator verifies integration, performs the authorized per-step squash, verifies the resulting diff and history, and updates the report with the final boundaries and acceptance result before advancing. Review supplements testing; it does not replace it.
 
 ## Maintaining this guide
 
