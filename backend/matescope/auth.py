@@ -4,7 +4,7 @@ import secrets
 import threading
 import time
 from collections import OrderedDict
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError
@@ -14,12 +14,14 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from .config import Settings
-from .models import Administrator, LoginSession
+from .models import Administrator, FactorEnrollment, LoginChallenge, LoginSession
 from .storage import Storage
+from .twofactor import FactorProof, revoke_auth, state, verify_factor
 
 router = APIRouter(prefix="/api/v1", tags=["authentication"])
 SESSION_COOKIE = "matescope_session"
 CSRF_COOKIE = "matescope_csrf"
+CHALLENGE_COOKIE = "matescope_2fa_challenge"
 password_hasher = PasswordHasher()  # Argon2id, RFC 9106 low-memory defaults.
 
 
@@ -134,6 +136,10 @@ def find_session(request: Request, session: Session) -> LoginSession:
     account_session = session.get(LoginSession, digest(token))
     if account_session is None or account_session.expires_at <= timestamp():
         raise HTTPException(401, "Authentication required")
+    admin = session.get(Administrator, account_session.administrator_id)
+    if admin is None or account_session.auth_version != admin.auth_version:
+        raise HTTPException(401, "Authentication required")
+    state(admin, session, storage(request).cipher)
     return account_session
 
 
@@ -164,7 +170,15 @@ class SetupStatus(CsrfResponse):
 
 
 class AuthResponse(UserResponse, CsrfResponse):
-    pass
+    status: Literal["authenticated"] = "authenticated"
+
+
+class ChallengeResponse(CsrfResponse):
+    status: Literal["two_factor_required"] = "two_factor_required"
+    expires_in: int = 300
+
+
+LoginResponse = Annotated[AuthResponse | ChallengeResponse, Field(discriminator="status")]
 
 
 class LoginInput(BaseModel):
@@ -184,6 +198,7 @@ class CreateAdminInput(LoginInput):
 
 
 class ChangePasswordInput(BaseModel):
+    proof: FactorProof | None = None
     current_password: SecretStr = Field(min_length=1, max_length=128)
     new_password: SecretStr = Field(min_length=12, max_length=128)
     password_confirmation: SecretStr = Field(min_length=12, max_length=128)
@@ -204,7 +219,9 @@ def verify_password(encoded: str, supplied: SecretStr) -> bool:
 
 def revoke_sessions(session: Session) -> None:
     """Used by password changes; the recovery CLI can share this transaction helper."""
-    session.execute(delete(LoginSession))
+    admin = session.get(Administrator, 1)
+    if admin is not None:
+        revoke_auth(session, admin)
 
 
 def create_session(request: Request, response: Response, session: Session) -> str:
@@ -215,10 +232,21 @@ def create_session(request: Request, response: Response, session: Session) -> st
     ).all()
     if hashes:
         session.execute(delete(LoginSession).where(LoginSession.token_hash.in_(hashes)))
+    session.execute(
+        delete(FactorEnrollment).where(
+            (FactorEnrollment.expires_at <= timestamp())
+            | (~FactorEnrollment.session_hash.in_(select(LoginSession.token_hash)))
+        )
+    )
     token = secrets.token_urlsafe(32)
     age = config(request).session_days * 86400
     session.add(
-        LoginSession(token_hash=digest(token), administrator_id=1, expires_at=timestamp() + age)
+        LoginSession(
+            token_hash=digest(token),
+            administrator_id=1,
+            expires_at=timestamp() + age,
+            auth_version=session.get_one(Administrator, 1).auth_version,
+        )
     )
     set_cookie(request, response, SESSION_COOKIE, token, age)
     return issue_csrf(request, response, rotate=True)
@@ -261,9 +289,11 @@ def create_administrator(
 
 
 @router.post(
-    "/auth/login", response_model=AuthResponse, dependencies=[WriteProtection, Depends(rate_limit)]
+    "/auth/login", response_model=LoginResponse, dependencies=[WriteProtection, Depends(rate_limit)]
 )
-def login(body: LoginInput, request: Request, response: Response) -> AuthResponse:
+def login(
+    body: LoginInput, request: Request, response: Response
+) -> AuthResponse | ChallengeResponse:
     with storage(request).transaction() as session:
         admin = session.get(Administrator, 1)
         encoded = admin.password_hash if admin else cast(str, request.app.state.dummy_password)
@@ -272,9 +302,50 @@ def login(body: LoginInput, request: Request, response: Response) -> AuthRespons
             raise HTTPException(401, "Invalid username or password")
         if password_hasher.check_needs_rehash(admin.password_hash):
             admin.password_hash = password_hasher.hash(body.password.get_secret_value())
-        token = create_session(request, response, session)
-        username = admin.username
-    return AuthResponse(username=username, csrf_token=token)
+        state(admin, session, storage(request).cipher)
+        if admin.totp_seed is not None:
+            # A browser awaiting its second factor must not retain a full session.
+            old_hash = digest(request.cookies.get(SESSION_COOKIE, ""))
+            session.execute(delete(LoginSession).where(LoginSession.token_hash == old_hash))
+            session.execute(
+                delete(FactorEnrollment).where(FactorEnrollment.session_hash == old_hash)
+            )
+            session.execute(
+                delete(LoginChallenge).where(
+                    (LoginChallenge.expires_at <= timestamp())
+                    | (
+                        LoginChallenge.token_hash
+                        == digest(request.cookies.get(CHALLENGE_COOKIE, ""))
+                    )
+                )
+            )
+            hashes = session.scalars(
+                select(LoginChallenge.token_hash)
+                .order_by(LoginChallenge.expires_at.desc())
+                .offset(19)
+            ).all()
+            if hashes:
+                session.execute(delete(LoginChallenge).where(LoginChallenge.token_hash.in_(hashes)))
+            challenge = secrets.token_urlsafe(32)
+            session.add(
+                LoginChallenge(
+                    token_hash=digest(challenge),
+                    administrator_id=1,
+                    auth_version=admin.auth_version,
+                    expires_at=timestamp() + 300,
+                )
+            )
+            clear_cookie(request, response, SESSION_COOKIE)
+            set_cookie(request, response, CHALLENGE_COOKIE, challenge, 300)
+            result: AuthResponse | ChallengeResponse = ChallengeResponse(
+                csrf_token=issue_csrf(request, response, rotate=True)
+            )
+        else:
+            clear_cookie(request, response, CHALLENGE_COOKIE)
+            result = AuthResponse(
+                username=admin.username, csrf_token=create_session(request, response, session)
+            )
+    return result
 
 
 @router.get("/auth/me", response_model=UserResponse)
@@ -286,8 +357,18 @@ def me(admin: CurrentAdmin) -> UserResponse:
 def logout(request: Request, response: Response) -> None:
     with storage(request).transaction() as session:
         account_session = find_session(request, session)
+        session.execute(
+            delete(FactorEnrollment).where(
+                FactorEnrollment.session_hash == account_session.token_hash
+            )
+        )
+        session.execute(
+            delete(LoginChallenge).where(
+                LoginChallenge.token_hash == digest(request.cookies.get(CHALLENGE_COOKIE, ""))
+            )
+        )
         session.delete(account_session)
-    for name in (SESSION_COOKIE, CSRF_COOKIE):
+    for name in (SESSION_COOKIE, CSRF_COOKIE, CHALLENGE_COOKIE):
         response.delete_cookie(
             name, path="/", httponly=True, secure=config(request).cookie_secure, samesite="lax"
         )
@@ -300,9 +381,23 @@ def change_password(body: ChangePasswordInput, request: Request, response: Respo
         admin = session.get(Administrator, account_session.administrator_id)
         if admin is None or not verify_password(admin.password_hash, body.current_password):
             raise HTTPException(401, "Invalid current password")
-        admin.password_hash = password_hasher.hash(body.new_password.get_secret_value())
-        revoke_sessions(session)
-    for name in (SESSION_COOKIE, CSRF_COOKIE):
+        error = (
+            verify_factor(session, admin, storage(request).cipher, body.proof, timestamp())
+            if admin.totp_seed
+            else None
+        )
+        if error is None:
+            admin.password_hash = password_hasher.hash(body.new_password.get_secret_value())
+            revoke_sessions(session)
+    if error is not None:
+        raise error
+    for name in (SESSION_COOKIE, CSRF_COOKIE, CHALLENGE_COOKIE):
         response.delete_cookie(
             name, path="/", httponly=True, secure=config(request).cookie_secure, samesite="lax"
         )
+
+
+def clear_cookie(request: Request, response: Response, name: str) -> None:
+    response.delete_cookie(
+        name, path="/", httponly=True, secure=config(request).cookie_secure, samesite="lax"
+    )

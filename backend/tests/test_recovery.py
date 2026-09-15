@@ -7,6 +7,7 @@ import stat
 import subprocess
 import sys
 import threading
+import time
 import zipfile
 from collections.abc import Iterator
 from pathlib import Path
@@ -91,6 +92,77 @@ def make_archive(source: Path, tmp_path: Path) -> Path:
     archive = tmp_path / "snapshot.matescope.zip"
     cli.backup(source, archive)
     return archive
+
+
+def make_legacy_schema(path: Path) -> None:
+    """Convert a synthetic head database to the exact historical 0002 table layout."""
+    with sqlite3.connect(path / cli.DATABASE) as connection:
+        for table in ("recovery_code", "factor_enrollment", "login_challenge"):
+            connection.execute(f"DROP TABLE {table}")
+        connection.execute("ALTER TABLE login_session DROP COLUMN auth_version")
+        for column in (
+            "auth_version",
+            "totp_seed",
+            "totp_enabled_at",
+            "totp_last_step",
+            "factor_failures",
+            "totp_used_codes",
+        ):
+            connection.execute(f"ALTER TABLE administrator DROP COLUMN {column}")
+        connection.execute("UPDATE alembic_version SET version_num='0002_settings'")
+
+
+def add_generated_session_column(path: Path, kind: str) -> None:
+    """Add a generated column without changing the supported visible columns."""
+    with sqlite3.connect(path / cli.DATABASE) as connection:
+        if kind == "VIRTUAL":
+            connection.execute(
+                "ALTER TABLE login_session ADD COLUMN unexpected INTEGER "
+                "GENERATED ALWAYS AS (0) VIRTUAL"
+            )
+            return
+        version = connection.execute("SELECT version_num FROM alembic_version").fetchone()[0]
+        columns = ["token_hash", "administrator_id", "expires_at"]
+        definitions = [
+            "token_hash VARCHAR(64) NOT NULL",
+            "administrator_id INTEGER NOT NULL",
+            "expires_at INTEGER NOT NULL",
+        ]
+        if version == "0003_two_factor":
+            columns.append("auth_version")
+            definitions.append("auth_version INTEGER NOT NULL")
+        connection.execute("ALTER TABLE login_session RENAME TO original_login_session")
+        connection.execute(
+            "CREATE TABLE login_session ("
+            + ", ".join(definitions)
+            + ", unexpected INTEGER GENERATED ALWAYS AS (0) STORED, "
+            "PRIMARY KEY (token_hash), "
+            "FOREIGN KEY(administrator_id) REFERENCES administrator (id))"
+        )
+        names = ", ".join(columns)
+        connection.execute(
+            f"INSERT INTO login_session ({names}) SELECT {names} FROM original_login_session"
+        )
+        connection.execute("DROP TABLE original_login_session")
+
+
+def configure_two_factor_state(path: Path) -> str:
+    key = (path / cli.KEY).read_bytes()
+    cipher = Fernet(key)
+    active_seed = cipher.encrypt(b"matescope-totp-v1:ABCDEFGHIJKLMNOPQRSTUVWXYZ234567").decode()
+    with sqlite3.connect(path / cli.DATABASE) as connection:
+        connection.execute(
+            "UPDATE administrator SET auth_version=7, totp_seed=?, totp_enabled_at=100, "
+            "totp_last_step=1, factor_failures='[10,20]', "
+            "totp_used_codes='[[\"aabbccddeeff00112233445566778899"
+            "aabbccddeeff00112233445566778899\",30]]' "
+            "WHERE id=1",
+            (active_seed,),
+        )
+        connection.execute("INSERT INTO login_session VALUES (?, 1, 1000, 7)", ("1" * 64,))
+        connection.execute("INSERT INTO login_challenge VALUES (?, 1, 7, 1000, 0)", ("2" * 64,))
+        connection.execute("INSERT INTO recovery_code VALUES (?, 1)", ("4" * 64,))
+    return active_seed
 
 
 def rewrite_archive(
@@ -367,6 +439,57 @@ def test_invalid_source_backup_and_reset_are_readonly(
     assert not list(tmp_path.glob(".matescope-backup-*"))
 
 
+@pytest.mark.parametrize("legacy", [False, True], ids=["0003", "0002"])
+@pytest.mark.parametrize("kind", ["VIRTUAL", "STORED"])
+def test_generated_columns_are_rejected_before_recovery_mutations_or_restore(
+    source: Path, tmp_path: Path, legacy: bool, kind: str
+) -> None:
+    if legacy:
+        make_legacy_schema(source)
+    archive = make_archive(source, tmp_path)
+    add_generated_session_column(source, kind)
+    with sqlite3.connect(source / cli.DATABASE) as connection:
+        columns = connection.execute("PRAGMA table_xinfo(login_session)").fetchall()
+        assert {column[1] for column in columns} == (
+            cli.SCHEMA_COLUMNS["0002_settings" if legacy else "0003_two_factor"]["login_session"]
+            | {"unexpected"}
+        )
+        assert columns[-1][1] == "unexpected"
+        assert columns[-1][6] == (2 if kind == "VIRTUAL" else 3)
+    original = contents(source)
+    archive_entries = entries(archive)
+    database_index = next(
+        index for index, entry in enumerate(archive_entries) if entry[0] == cli.DATABASE
+    )
+    _, mode = archive_entries[database_index][1:]
+    database = (source / cli.DATABASE).read_bytes()
+    archive_entries[database_index] = (cli.DATABASE, database, mode)
+    manifest = json.loads(archive_entries[0][1])
+    manifest["files"][cli.DATABASE] = {
+        "size": len(database),
+        "sha256": hashlib.sha256(database).hexdigest(),
+    }
+    archive_entries[0] = (cli.MANIFEST, json.dumps(manifest).encode(), archive_entries[0][2])
+    rewrite_archive(archive, archive_entries)
+    backup = tmp_path / f"generated-{legacy}-{kind}.zip"
+    for operation in (
+        lambda: cli.backup(source, backup),
+        lambda: cli.reset_password(source, NEW_PASSWORD, NEW_PASSWORD),
+        lambda: cli.reset_two_factor(source),
+    ):
+        with pytest.raises(cli.RecoveryError, match="Unsupported database schema"):
+            operation()
+        assert contents(source) == original
+        assert not backup.exists()
+    target = tmp_path / "target"
+    target.mkdir(mode=0o755)
+    with pytest.raises(cli.RecoveryError, match="Unsupported database schema"):
+        cli.restore(target, archive)
+    assert contents(source) == original
+    assert not list(target.iterdir())
+    assert stat.S_IMODE(target.stat().st_mode) == 0o755
+
+
 def test_backup_refuses_overwrite_and_symlink_parent(source: Path, tmp_path: Path) -> None:
     archive = make_archive(source, tmp_path)
     original = archive.read_bytes()
@@ -560,6 +683,243 @@ def test_missing_key_cli_reports_recovery_without_initialization(
         assert not output.exists()
 
 
+def test_true_0002_backup_restore_and_password_reset(source: Path, tmp_path: Path) -> None:
+    make_legacy_schema(source)
+    with sqlite3.connect(source / cli.DATABASE) as connection:
+        assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (
+            "0002_settings",
+        )
+        assert {
+            row[1] for row in connection.execute("PRAGMA table_info(administrator)")
+        } == cli.SCHEMA_COLUMNS["0002_settings"]["administrator"]
+        original_password_hash = connection.execute(
+            "SELECT password_hash FROM administrator WHERE id=1"
+        ).fetchone()[0]
+        original_settings = connection.execute(
+            "SELECT configuration, encrypted_passwords FROM application_settings WHERE id=1"
+        ).fetchone()
+        assert json.loads(original_settings[0])["onboarding"]["completed"] is True
+    archive = make_archive(source, tmp_path)
+    with zipfile.ZipFile(archive) as bundle:
+        assert json.loads(bundle.read(cli.MANIFEST))["schema_version"] == "0002_settings"
+    cli.reset_password(source, NEW_PASSWORD, NEW_PASSWORD)
+    restored = tmp_path / "restored-0002"
+    restored.mkdir()
+    assert cli.restore(restored, archive) == "0002_settings"
+    with sqlite3.connect(restored / cli.DATABASE) as connection:
+        assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (
+            "0002_settings",
+        )
+        assert connection.execute("SELECT COUNT(*) FROM login_session").fetchone() == (0,)
+    with TestClient(create_app(app_settings(restored))) as client:
+        assert login(client) == 200
+    with sqlite3.connect(restored / cli.DATABASE) as connection:
+        assert connection.execute(
+            "SELECT password_hash FROM administrator WHERE id=1"
+        ).fetchone() == (original_password_hash,)
+        assert connection.execute(
+            "SELECT configuration, encrypted_passwords FROM application_settings WHERE id=1"
+        ).fetchone() == original_settings
+        assert json.loads(original_settings[0])["onboarding"]["completed"] is True
+        assert connection.execute(
+            "SELECT auth_version, totp_seed, totp_enabled_at, totp_last_step, "
+            "factor_failures, totp_used_codes FROM administrator WHERE id=1"
+        ).fetchone() == (0, None, None, -1, "[]", "[]")
+
+
+def test_reset_2fa_on_0002_leaves_legacy_database_unchanged(source: Path) -> None:
+    make_legacy_schema(source)
+    original = contents(source)
+    assert cli.reset_two_factor(source) is False
+    assert contents(source) == original
+
+
+def test_restore_rejects_a_valid_checksum_with_a_mismatched_schema_manifest(
+    source: Path, tmp_path: Path
+) -> None:
+    archive = make_archive(source, tmp_path)
+    items = entries(archive)
+    manifest = json.loads(items[0][1])
+    manifest["schema_version"] = "0002_settings"
+    manifest_data = json.dumps(manifest).encode()
+    items[0] = (cli.MANIFEST, manifest_data, items[0][2])
+    rewrite_archive(archive, items)
+    target = tmp_path / "target-mismatch"
+    target.mkdir()
+    with pytest.raises(cli.RecoveryError, match="manifest does not match"):
+        cli.restore(target, archive)
+    assert not list(target.iterdir())
+
+
+def test_restore_0003_preserves_seed_and_clears_recoverable_auth_state(
+    source: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    active_seed = configure_two_factor_state(source)
+    archive = make_archive(source, tmp_path)
+    restored = tmp_path / "restored-0003"
+    restored.mkdir()
+    assert (
+        cli.main(
+            ["restore", "--data-dir", str(restored), "--input", str(archive), "--service-stopped"]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out
+    assert "archive-time password and any active TOTP seed were restored" in output
+    assert "recovery codes" in output
+    assert "Wait up to 60 seconds" in output
+    assert "sign in with the authenticator and generate new recovery codes" in output
+    with sqlite3.connect(restored / cli.DATABASE) as connection:
+        admin = connection.execute(
+            "SELECT auth_version, totp_seed, totp_last_step, factor_failures, totp_used_codes "
+            "FROM administrator"
+        ).fetchone()
+        assert admin[0] == 8 and admin[1] == active_seed
+        assert admin[2] >= int(time.time() // cli.TOTP_PERIOD)
+        assert admin[3:] == ("[]", "[]")
+        for table in ("login_session", "login_challenge", "factor_enrollment", "recovery_code"):
+            assert connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone() == (0,)
+
+
+def test_reset_password_preserves_active_2fa_and_reset_2fa_clears_it(
+    source: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    active_seed = configure_two_factor_state(source)
+    cli.reset_password(source, NEW_PASSWORD, NEW_PASSWORD)
+    with sqlite3.connect(source / cli.DATABASE) as connection:
+        admin = connection.execute(
+            "SELECT auth_version, totp_seed FROM administrator"
+        ).fetchone()
+        assert admin == (8, active_seed)
+        assert connection.execute("SELECT COUNT(*) FROM recovery_code").fetchone() == (1,)
+        assert connection.execute("SELECT COUNT(*) FROM factor_enrollment").fetchone() == (0,)
+        assert connection.execute("SELECT COUNT(*) FROM login_challenge").fetchone() == (0,)
+    with pytest.raises(SystemExit) as error:
+        cli.main(["reset-2fa", "--data-dir", str(source)])
+    assert error.value.code == 2
+    assert (
+        cli.main(
+            [
+                "reset-2fa",
+                "--data-dir",
+                str(source),
+                "--service-stopped",
+                "--confirm-reset-2fa",
+            ]
+        )
+        == 0
+    )
+    assert "reset-2fa completed" in capsys.readouterr().out
+    with sqlite3.connect(source / cli.DATABASE) as connection:
+        assert connection.execute(
+            "SELECT auth_version, totp_seed, totp_enabled_at, totp_last_step, "
+            "factor_failures, totp_used_codes FROM administrator"
+        ).fetchone() == (9, None, None, -1, "[]", "[]")
+        for table in ("login_session", "login_challenge", "factor_enrollment", "recovery_code"):
+            assert connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone() == (0,)
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "seed",
+        "failure-budget",
+        "used-code",
+        "recovery-code",
+        "session-version",
+        "challenge-version",
+        "active-last-step",
+        "disabled-recovery",
+        "enabled-enrollment",
+        "orphan-enrollment",
+    ],
+)
+def test_invalid_0003_two_factor_state_blocks_backup_and_recovery_mutation(
+    source: Path, tmp_path: Path, damage: str
+) -> None:
+    configure_two_factor_state(source)
+    with sqlite3.connect(source / cli.DATABASE) as connection:
+        if damage == "seed":
+            connection.execute("UPDATE administrator SET totp_seed='invalid'")
+        elif damage == "failure-budget":
+            connection.execute(
+                "UPDATE administrator SET "
+                "factor_failures='[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21]'"
+            )
+        elif damage == "used-code":
+            connection.execute("UPDATE administrator SET totp_used_codes='[[\"not-a-digest\",1]]'")
+        elif damage == "recovery-code":
+            connection.execute("INSERT INTO recovery_code VALUES (?, 1)", ("Z" * 64,))
+        elif damage == "session-version":
+            connection.execute("UPDATE login_session SET auth_version=6")
+        elif damage == "challenge-version":
+            connection.execute("UPDATE login_challenge SET auth_version=6")
+        elif damage == "active-last-step":
+            connection.execute("UPDATE administrator SET totp_last_step=-1")
+        elif damage == "disabled-recovery":
+            connection.execute(
+                "UPDATE administrator SET totp_seed=NULL, totp_enabled_at=NULL, "
+                "totp_last_step=-1, totp_used_codes='[]'"
+            )
+        elif damage == "enabled-enrollment":
+            seed = Fernet((source / cli.KEY).read_bytes()).encrypt(
+                b"matescope-totp-v1:234567ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            ).decode()
+            connection.execute(
+                "INSERT INTO factor_enrollment VALUES (1, ?, 7, ?, 1000)",
+                ("1" * 64, seed),
+            )
+        else:
+            seed = Fernet((source / cli.KEY).read_bytes()).encrypt(
+                b"matescope-totp-v1:234567ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            ).decode()
+            connection.execute("DELETE FROM login_challenge")
+            connection.execute("DELETE FROM recovery_code")
+            connection.execute(
+                "UPDATE administrator SET totp_seed=NULL, totp_enabled_at=NULL, "
+                "totp_last_step=-1, totp_used_codes='[]'"
+            )
+            connection.execute(
+                "INSERT INTO factor_enrollment VALUES (1, ?, 7, ?, 1000)",
+                ("5" * 64, seed),
+            )
+    original = contents(source)
+    with pytest.raises(cli.RecoveryError, match="two-factor|administrator or session"):
+        cli.backup(source, tmp_path / "invalid.zip")
+    with pytest.raises(cli.RecoveryError, match="two-factor|administrator or session"):
+        cli.reset_two_factor(source)
+    assert contents(source) == original
+
+
+@pytest.mark.parametrize("token, expires_at", [("not-a-digest", 1000), ("a" * 64, 0)])
+def test_invalid_0002_session_blocks_backup_and_reset(
+    source: Path, tmp_path: Path, token: str, expires_at: int
+) -> None:
+    make_legacy_schema(source)
+    with sqlite3.connect(source / cli.DATABASE) as connection:
+        connection.execute(
+            "INSERT INTO login_session VALUES (?, 1, ?)", (token, expires_at)
+        )
+    original = contents(source)
+    with pytest.raises(cli.RecoveryError, match="administrator or session"):
+        cli.backup(source, tmp_path / "invalid-legacy.zip")
+    with pytest.raises(cli.RecoveryError, match="administrator or session"):
+        cli.reset_password(source, NEW_PASSWORD, NEW_PASSWORD)
+    assert contents(source) == original
+
+
+def test_0002_session_capacity_is_bounded(source: Path, tmp_path: Path) -> None:
+    make_legacy_schema(source)
+    with sqlite3.connect(source / cli.DATABASE) as connection:
+        for index in range(cli.MAX_SESSIONS + 1):
+            connection.execute(
+                "INSERT INTO login_session VALUES (?, 1, 1000)",
+                (f"{index:064x}",),
+            )
+    with pytest.raises(cli.RecoveryError, match="administrator or session"):
+        cli.backup(source, tmp_path / "too-many-legacy-sessions.zip")
+
+
 def test_schema_catalog_limit_rejects_hidden_unsupported_objects(
     source: Path, tmp_path: Path
 ) -> None:
@@ -576,15 +936,23 @@ def test_schema_catalog_limit_rejects_hidden_unsupported_objects(
         connection.execute(
             "CREATE TABLE administrator (id INTEGER PRIMARY KEY, "
             "username VARCHAR(64) NOT NULL, password_hash VARCHAR(256) NOT NULL, "
+            "auth_version INTEGER NOT NULL DEFAULT 0, totp_seed VARCHAR, "
+            "totp_enabled_at INTEGER, totp_last_step INTEGER NOT NULL DEFAULT -1, "
+            "factor_failures VARCHAR NOT NULL DEFAULT '[]', "
+            "totp_used_codes VARCHAR NOT NULL DEFAULT '[]', "
             + ", ".join(constraints)
             + ")"
         )
-        connection.execute("INSERT INTO administrator VALUES (?, ?, ?)", administrator)
+        connection.execute(
+            "INSERT INTO administrator VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", administrator
+        )
         connection.execute("CREATE TABLE unsupported_after_limit (id INTEGER)")
         objects = connection.execute("SELECT type, name FROM sqlite_schema").fetchall()
         assert len(objects) > 32
         assert "unsupported_after_limit" not in {name for _, name in objects[:32]}
-        assert {name for kind, name in objects[:32] if kind == "table"} == cli.COLUMNS.keys()
+        assert {name for kind, name in objects[:32] if kind == "table"} == cli.SCHEMA_COLUMNS[
+            cli.SCHEMA_VERSION
+        ].keys()
         assert connection.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
     original = contents(source)
     output = tmp_path / "unsupported.matescope.zip"

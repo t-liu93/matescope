@@ -263,7 +263,7 @@ def test_restart_migration_key_permissions_and_missing_key(tmp_path: Path) -> No
         with client.app.state.storage.engine.connect() as connection:
             assert (
                 connection.scalar(text("select version_num from alembic_version"))
-                == "0002_settings"
+                == "0003_two_factor"
             )
     key = (tmp_path / "encryption.key").read_bytes()
     assert stat.S_IMODE(tmp_path.stat().st_mode) == 0o700

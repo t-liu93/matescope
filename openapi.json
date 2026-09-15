@@ -111,7 +111,22 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AuthResponse"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AuthResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ChallengeResponse"
+                    }
+                  ],
+                  "title": "Response Login Api V1 Auth Login Post",
+                  "discriminator": {
+                    "propertyName": "status",
+                    "mapping": {
+                      "authenticated": "#/components/schemas/AuthResponse",
+                      "two_factor_required": "#/components/schemas/ChallengeResponse"
+                    }
+                  }
                 }
               }
             }
@@ -184,6 +199,239 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/two-factor": {
+      "get": {
+        "tags": [
+          "authentication"
+        ],
+        "summary": "Status",
+        "operationId": "status_api_v1_auth_two_factor_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FactorStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/two-factor/verify": {
+      "post": {
+        "tags": [
+          "authentication"
+        ],
+        "summary": "Verify",
+        "operationId": "verify_api_v1_auth_two_factor_verify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FactorProof"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/two-factor/cancel": {
+      "post": {
+        "tags": [
+          "authentication"
+        ],
+        "summary": "Cancel",
+        "operationId": "cancel_api_v1_auth_two_factor_cancel_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/two-factor/enroll": {
+      "post": {
+        "tags": [
+          "authentication"
+        ],
+        "summary": "Enroll",
+        "operationId": "enroll_api_v1_auth_two_factor_enroll_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrollmentResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/two-factor/confirm": {
+      "post": {
+        "tags": [
+          "authentication"
+        ],
+        "summary": "Confirm",
+        "operationId": "confirm_api_v1_auth_two_factor_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryCodesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/two-factor/disable": {
+      "post": {
+        "tags": [
+          "authentication"
+        ],
+        "summary": "Disable",
+        "operationId": "disable_api_v1_auth_two_factor_disable_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagementInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/two-factor/recovery-codes": {
+      "post": {
+        "tags": [
+          "authentication"
+        ],
+        "summary": "Regenerate",
+        "operationId": "regenerate_api_v1_auth_two_factor_recovery_codes_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagementInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryCodesResponse"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -956,6 +1204,12 @@
           "username": {
             "type": "string",
             "title": "Username"
+          },
+          "status": {
+            "type": "string",
+            "const": "authenticated",
+            "title": "Status",
+            "default": "authenticated"
           }
         },
         "type": "object",
@@ -965,8 +1219,42 @@
         ],
         "title": "AuthResponse"
       },
+      "ChallengeResponse": {
+        "properties": {
+          "csrf_token": {
+            "type": "string",
+            "title": "Csrf Token"
+          },
+          "status": {
+            "type": "string",
+            "const": "two_factor_required",
+            "title": "Status",
+            "default": "two_factor_required"
+          },
+          "expires_in": {
+            "type": "integer",
+            "title": "Expires In",
+            "default": 300
+          }
+        },
+        "type": "object",
+        "required": [
+          "csrf_token"
+        ],
+        "title": "ChallengeResponse"
+      },
       "ChangePasswordInput": {
         "properties": {
+          "proof": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FactorProof"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "current_password": {
             "type": "string",
             "maxLength": 128,
@@ -1101,6 +1389,32 @@
         ],
         "title": "ChargePage"
       },
+      "ConfirmInput": {
+        "properties": {
+          "current_password": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "format": "password",
+            "title": "Current Password",
+            "writeOnly": true
+          },
+          "code": {
+            "type": "string",
+            "maxLength": 6,
+            "minLength": 6,
+            "format": "password",
+            "title": "Code",
+            "writeOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "current_password",
+          "code"
+        ],
+        "title": "ConfirmInput"
+      },
       "CreateAdminInput": {
         "properties": {
           "username": {
@@ -1167,6 +1481,73 @@
           "smtp"
         ],
         "title": "Diagnostics"
+      },
+      "EnrollmentResponse": {
+        "properties": {
+          "secret": {
+            "type": "string",
+            "title": "Secret"
+          },
+          "provisioning_uri": {
+            "type": "string",
+            "title": "Provisioning Uri"
+          },
+          "expires_in": {
+            "type": "integer",
+            "title": "Expires In",
+            "default": 600
+          }
+        },
+        "type": "object",
+        "required": [
+          "secret",
+          "provisioning_uri"
+        ],
+        "title": "EnrollmentResponse"
+      },
+      "FactorProof": {
+        "properties": {
+          "method": {
+            "type": "string",
+            "enum": [
+              "totp",
+              "recovery_code"
+            ],
+            "title": "Method"
+          },
+          "code": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "format": "password",
+            "title": "Code",
+            "writeOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "method",
+          "code"
+        ],
+        "title": "FactorProof"
+      },
+      "FactorStatus": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "recovery_codes_remaining": {
+            "type": "integer",
+            "title": "Recovery Codes Remaining"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled",
+          "recovery_codes_remaining"
+        ],
+        "title": "FactorStatus"
       },
       "HTTPValidationError": {
         "properties": {
@@ -1445,6 +1826,27 @@
         ],
         "title": "MQTTTestResult"
       },
+      "ManagementInput": {
+        "properties": {
+          "current_password": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "format": "password",
+            "title": "Current Password",
+            "writeOnly": true
+          },
+          "proof": {
+            "$ref": "#/components/schemas/FactorProof"
+          }
+        },
+        "type": "object",
+        "required": [
+          "current_password",
+          "proof"
+        ],
+        "title": "ManagementInput"
+      },
       "Onboarding": {
         "properties": {
           "step": {
@@ -1500,6 +1902,23 @@
         "additionalProperties": false,
         "type": "object",
         "title": "PasswordChange"
+      },
+      "PasswordInput": {
+        "properties": {
+          "current_password": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "format": "password",
+            "title": "Current Password",
+            "writeOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "current_password"
+        ],
+        "title": "PasswordInput"
       },
       "Point": {
         "properties": {
@@ -1824,6 +2243,38 @@
           "service"
         ],
         "title": "ReadinessResponse"
+      },
+      "RecoveryCodesResponse": {
+        "properties": {
+          "csrf_token": {
+            "type": "string",
+            "title": "Csrf Token"
+          },
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "status": {
+            "type": "string",
+            "const": "authenticated",
+            "title": "Status",
+            "default": "authenticated"
+          },
+          "recovery_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Recovery Codes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "csrf_token",
+          "username",
+          "recovery_codes"
+        ],
+        "title": "RecoveryCodesResponse"
       },
       "SMTPInput": {
         "properties": {

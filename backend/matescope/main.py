@@ -17,6 +17,7 @@ from .data import router as data_router
 from .postgresql import DataSource
 from .settings import router as settings_router
 from .storage import Storage
+from .twofactor_routes import router as twofactor_router
 
 
 class HealthResponse(BaseModel):
@@ -59,6 +60,7 @@ def create_app(
     )
     application.state.settings = configuration
     application.include_router(router)
+    application.include_router(twofactor_router)
     application.include_router(settings_router)
     application.include_router(data_router)
 
