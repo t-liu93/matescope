@@ -29,6 +29,7 @@ import {
 } from "@tanstack/react-query";
 import { createRoot } from "react-dom/client";
 import { useState } from "react";
+import type { FormEvent } from "react";
 import {
   BrowserRouter,
   Link,
@@ -158,12 +159,17 @@ function Credentials() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
+  const [confirmationMismatch, setConfirmationMismatch] = useState(false);
   const create = useMutation({
-    mutationFn: () =>
+    mutationFn: (values: {
+      username: string;
+      password: string;
+      confirmation: string;
+    }) =>
       authApi.createAdministrator({
-        username,
-        password,
-        password_confirmation: confirmation,
+        username: values.username,
+        password: values.password,
+        password_confirmation: values.confirmation,
       }),
     onSuccess: (data) => {
       setCsrf(data.csrf_token);
@@ -172,7 +178,8 @@ function Credentials() {
     },
   });
   const login = useMutation({
-    mutationFn: () => authApi.login({ username, password }),
+    mutationFn: (values: { username: string; password: string }) =>
+      authApi.login(values),
     onSuccess: (data) => {
       setCsrf(data.csrf_token);
       navigate("/", { replace: true });
@@ -188,9 +195,25 @@ function Credentials() {
       />
     );
   const creating = setup.data.administrator_exists === false;
-  const submit = () => {
-    if (creating && password !== confirmation) return;
-    (creating ? create : login).mutate();
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (create.isPending || login.isPending) return;
+    const values = new FormData(event.currentTarget);
+    const formUsername = String(values.get("username") ?? "");
+    const formPassword = String(values.get("password") ?? "");
+    const formConfirmation = String(values.get("password_confirmation") ?? "");
+    const mismatch = creating && formPassword !== formConfirmation;
+    setConfirmationMismatch(mismatch);
+    if (mismatch) return;
+    if (creating) {
+      create.mutate({
+        username: formUsername,
+        password: formPassword,
+        confirmation: formConfirmation,
+      });
+    } else {
+      login.mutate({ username: formUsername, password: formPassword });
+    }
   };
   const error = create.error ?? login.error;
   return (
@@ -206,51 +229,59 @@ function Credentials() {
               {creating ? t("createTitle") : t("loginTitle")}
             </Title>
             {creating && <Text c="dimmed">{t("createIntro")}</Text>}
-            <TextInput
-              label={t("username")}
-              value={username}
-              onChange={(e) => setUsername(e.currentTarget.value)}
-              autoComplete="username"
-              required
-            />
-            <PasswordInput
-              label={t("password")}
-              value={password}
-              onChange={(e) => setPassword(e.currentTarget.value)}
-              autoComplete={creating ? "new-password" : "current-password"}
-              required
-            />
-            {creating && (
-              <>
-                <PasswordInput
-                  label={t("confirmPassword")}
-                  value={confirmation}
-                  onChange={(e) => setConfirmation(e.currentTarget.value)}
-                  autoComplete="new-password"
-                  error={
-                    confirmation && password !== confirmation
-                      ? t("passwordsMismatch")
-                      : undefined
-                  }
+            <form method="post" onSubmit={submit} noValidate={false}>
+              <Stack>
+                <TextInput
+                  id="credentials-username"
+                  name="username"
+                  label={t("username")}
+                  defaultValue={username}
+                  onChange={(e) => setUsername(e.currentTarget.value)}
+                  autoComplete="username"
+                  spellCheck={false}
+                  autoCapitalize="none"
                   required
                 />
-                <Text size="sm" c="dimmed">
-                  {t("passwordMin")}
-                </Text>
-              </>
-            )}
-            {error && <Alert color="red">{errorMessage(error, t)}</Alert>}
-            <Button
-              onClick={submit}
-              loading={create.isPending || login.isPending}
-              disabled={
-                !username ||
-                !password ||
-                (creating && (!confirmation || password !== confirmation))
-              }
-            >
-              {creating ? t("create") : t("signIn")}
-            </Button>
+                <PasswordInput
+                  id="credentials-password"
+                  name="password"
+                  label={t("password")}
+                  defaultValue={password}
+                  onChange={(e) => setPassword(e.currentTarget.value)}
+                  autoComplete={creating ? "new-password" : "current-password"}
+                  required
+                />
+                {creating && (
+                  <>
+                    <PasswordInput
+                      id="credentials-password-confirmation"
+                      name="password_confirmation"
+                      label={t("confirmPassword")}
+                      defaultValue={confirmation}
+                      onChange={(e) => {
+                        setConfirmation(e.currentTarget.value);
+                        setConfirmationMismatch(false);
+                      }}
+                      autoComplete="new-password"
+                      error={
+                        confirmationMismatch ||
+                        (confirmation && password !== confirmation)
+                          ? t("passwordsMismatch")
+                          : undefined
+                      }
+                      required
+                    />
+                    <Text size="sm" c="dimmed">
+                      {t("passwordMin")}
+                    </Text>
+                  </>
+                )}
+                {error && <Alert color="red">{errorMessage(error, t)}</Alert>}
+                <Button type="submit" loading={create.isPending || login.isPending}>
+                  {creating ? t("create") : t("signIn")}
+                </Button>
+              </Stack>
+            </form>
           </Stack>
         </Paper>
       </Stack>
@@ -1025,44 +1056,80 @@ function PasswordChange() {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [confirmationMismatch, setConfirmationMismatch] = useState(false);
   const mutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (values: {
+      current: string;
+      next: string;
+      confirm: string;
+    }) =>
       authApi.changePassword({
-        current_password: current,
-        new_password: next,
-        password_confirmation: confirm,
+        current_password: values.current,
+        new_password: values.next,
+        password_confirmation: values.confirm,
       }),
     onSuccess: () => {
       qc.clear();
       navigate("/login");
     },
   });
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (mutation.isPending) return;
+    const values = new FormData(event.currentTarget);
+    const formCurrent = String(values.get("current_password") ?? "");
+    const formNext = String(values.get("new_password") ?? "");
+    const formConfirm = String(values.get("password_confirmation") ?? "");
+    const mismatch = formNext !== formConfirm;
+    setConfirmationMismatch(mismatch);
+    if (mismatch) return;
+    mutation.mutate({ current: formCurrent, next: formNext, confirm: formConfirm });
+  };
   return (
     <FormCard title={t("changePassword")} error={mutation.error}>
-      <Text c="dimmed">{t("changePasswordNotice")}</Text>
-      <PasswordInput
-        label={t("currentPassword")}
-        value={current}
-        onChange={(e) => setCurrent(e.currentTarget.value)}
-      />
-      <PasswordInput
-        label={t("newPassword")}
-        value={next}
-        onChange={(e) => setNext(e.currentTarget.value)}
-      />
-      <PasswordInput
-        label={t("confirmPassword")}
-        value={confirm}
-        onChange={(e) => setConfirm(e.currentTarget.value)}
-        error={confirm && next !== confirm ? t("passwordsMismatch") : undefined}
-      />
-      <Button
-        disabled={!current || !next || next !== confirm}
-        loading={mutation.isPending}
-        onClick={() => mutation.mutate()}
-      >
-        {t("updatePassword")}
-      </Button>
+      <form method="post" onSubmit={submit}>
+        <Stack>
+          <Text c="dimmed">{t("changePasswordNotice")}</Text>
+          <PasswordInput
+            id="change-password-current"
+            name="current_password"
+            label={t("currentPassword")}
+            defaultValue={current}
+            onChange={(e) => setCurrent(e.currentTarget.value)}
+            autoComplete="current-password"
+            required
+          />
+          <PasswordInput
+            id="change-password-new"
+            name="new_password"
+            label={t("newPassword")}
+            defaultValue={next}
+            onChange={(e) => setNext(e.currentTarget.value)}
+            autoComplete="new-password"
+            required
+          />
+          <PasswordInput
+            id="change-password-confirmation"
+            name="password_confirmation"
+            label={t("confirmPassword")}
+            defaultValue={confirm}
+            onChange={(e) => {
+              setConfirm(e.currentTarget.value);
+              setConfirmationMismatch(false);
+            }}
+            autoComplete="new-password"
+            error={
+              confirmationMismatch || (confirm && next !== confirm)
+                ? t("passwordsMismatch")
+                : undefined
+            }
+            required
+          />
+          <Button type="submit" loading={mutation.isPending}>
+            {t("updatePassword")}
+          </Button>
+        </Stack>
+      </form>
     </FormCard>
   );
 }

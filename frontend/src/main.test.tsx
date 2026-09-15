@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./main";
 
@@ -8,7 +8,10 @@ const response = (body: unknown, status = 200) =>
     headers: { "Content-Type": "application/json" },
   });
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 describe("first administrator flow", () => {
   it("shows administrator creation directly and validates the password confirmation", async () => {
@@ -108,5 +111,111 @@ describe("first administrator flow", () => {
       ).toBeEnabled(),
     );
     expect(fetchMock).toBeDefined();
+  });
+
+  it("submits browser-autofilled login values from the native form", async () => {
+    window.history.pushState({}, "", "/login");
+    const requests: Array<{ url: string; body?: string }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url =
+        typeof input === "object" && input && "url" in input
+          ? String(input.url)
+          : String(input);
+      const body =
+        input instanceof Request
+          ? await input.clone().text()
+          : typeof init?.body === "string"
+            ? init.body
+            : undefined;
+      requests.push({ url, body });
+      if (url.endsWith("/api/v1/setup/status"))
+        return response({ administrator_exists: true, csrf_token: "initial" });
+      if (url.endsWith("/api/v1/auth/login"))
+        return response({ username: "autofilled", csrf_token: "logged-in" });
+      return response({ username: "autofilled" });
+    });
+
+    render(<App />);
+    await screen.findByRole("heading", { name: "Sign in" });
+    const username = screen.getByRole("textbox", { name: "Username" });
+    const password = document.getElementById("credentials-password");
+    expect(password).not.toBeNull();
+    const form = username.closest("form");
+    expect(form).not.toBeNull();
+
+    // Simulate a password manager filling the DOM without dispatching React
+    // change events. The submit handler must still read these values.
+    Object.assign(username, { value: "autofilled" });
+    Object.assign(password as HTMLInputElement, { value: "browser-password" });
+    fireEvent.submit(form!);
+
+    await waitFor(() => {
+      const request = requests.find((item) => item.url.endsWith("/api/v1/auth/login"));
+      expect(request).toBeDefined();
+      expect(JSON.parse(String(request?.body))).toEqual({
+        username: "autofilled",
+        password: "browser-password",
+      });
+    });
+  });
+
+  it("shows and clears a mismatch from browser-autofilled creation values", async () => {
+    window.history.pushState({}, "", "/login");
+    const requests: Array<{ url: string; body?: string }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url =
+        typeof input === "object" && input && "url" in input
+          ? String(input.url)
+          : String(input);
+      const body =
+        input instanceof Request
+          ? await input.clone().text()
+          : typeof init?.body === "string"
+            ? init.body
+            : undefined;
+      requests.push({ url, body });
+      if (url.endsWith("/api/v1/setup/status"))
+        return response({ administrator_exists: false, csrf_token: "initial" });
+      if (url.endsWith("/api/v1/setup/administrator"))
+        return response({ username: "autofilled", csrf_token: "created" }, 201);
+      return response({ username: "autofilled" });
+    });
+
+    render(<App />);
+    await screen.findByRole("heading", { name: "Create the administrator" });
+    const username = document.getElementById("credentials-username");
+    const password = document.getElementById("credentials-password");
+    const confirmation = document.getElementById(
+      "credentials-password-confirmation",
+    );
+    const form = username?.closest("form");
+    expect(form).not.toBeNull();
+    Object.assign(username as HTMLInputElement, { value: "autofilled" });
+    Object.assign(password as HTMLInputElement, { value: "first-password" });
+    Object.assign(confirmation as HTMLInputElement, {
+      value: "different-password",
+    });
+    fireEvent.submit(form!);
+
+    expect(await screen.findByText("Passwords do not match.")).toBeInTheDocument();
+    expect((password as HTMLInputElement).value).toBe("first-password");
+    expect((confirmation as HTMLInputElement).value).toBe("different-password");
+    expect(
+      requests.some((item) => item.url.endsWith("/api/v1/setup/administrator")),
+    ).toBe(false);
+
+    Object.assign(confirmation as HTMLInputElement, { value: "first-password" });
+    fireEvent.submit(form!);
+    await waitFor(() => {
+      const request = requests.find((item) =>
+        item.url.endsWith("/api/v1/setup/administrator"),
+      );
+      expect(request).toBeDefined();
+      expect(JSON.parse(String(request?.body))).toEqual({
+        username: "autofilled",
+        password: "first-password",
+        password_confirmation: "first-password",
+      });
+    });
   });
 });
