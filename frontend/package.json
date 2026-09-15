@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:smoke": "playwright test",
+    "test:pwa": "pnpm run build && playwright test --config playwright.pwa.config.ts",
     "generate:api": "uv run --project .. python ../scripts/export_openapi.py && openapi-typescript ../openapi.json -o src/api/schema.d.ts"
   },
   "dependencies": {

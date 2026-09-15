@@ -49,6 +49,7 @@ jobs:
       - run: pnpm --dir frontend lint
       - run: pnpm --dir frontend typecheck
       - run: pnpm --dir frontend test
+      - run: pnpm --dir frontend test:pwa
       - run: pnpm --dir frontend build
       - run: docker compose -f compose.yaml -f compose.dev.yaml config --quiet
       - run: docker build --tag matescope:ci .

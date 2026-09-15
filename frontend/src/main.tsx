@@ -50,6 +50,7 @@ import {
 } from "./history";
 import type { components } from "./api/schema";
 import i18n from "./i18n";
+import { PwaStatus, registerPwa } from "./pwa";
 
 type Settings = components["schemas"]["SettingsResponse"];
 type Step = components["schemas"]["Onboarding"]["step"];
@@ -1204,6 +1205,7 @@ function Shell() {
         </AppShell.Header>
       )}
       <AppShell.Main>
+        <Container size="sm" pt="md"><PwaStatus showInstall={showHeader} /></Container>
         <Routes>
           <Route path="/login" element={<Credentials />} />
           <Route
@@ -1255,4 +1257,5 @@ function App() {
 }
 const root = document.getElementById("root");
 if (root) createRoot(root).render(<App />);
+registerPwa();
 export default App;

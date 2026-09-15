@@ -30,7 +30,9 @@ class ReadinessResponse(BaseModel):
     service: str
 
 
-def create_app(configuration: Settings | None = None) -> FastAPI:
+def create_app(
+    configuration: Settings | None = None, *, static_dir: Path | None = None
+) -> FastAPI:
     configuration = configuration or settings
 
     @asynccontextmanager
@@ -83,18 +85,25 @@ def create_app(configuration: Settings | None = None) -> FastAPI:
     def readiness() -> ReadinessResponse:
         return ReadinessResponse(status="ready", service="matescope")
 
-    static_dir = Path(__file__).resolve().parents[2] / "frontend" / "dist"
-    if static_dir.is_dir():
-        application.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="assets")
+    frontend_dist = static_dir or Path(__file__).resolve().parents[2] / "frontend" / "dist"
+    if frontend_dist.is_dir():
+        application.mount("/assets", StaticFiles(directory=frontend_dist / "assets"), name="assets")
 
         @application.get("/{path:path}", include_in_schema=False, response_model=None)
         async def spa(path: str) -> FileResponse | JSONResponse:
             if path == "api" or path.startswith("api/"):
                 return JSONResponse({"detail": "Not Found"}, status_code=404)
-            candidate = static_dir / path
-            if path and candidate.is_file() and static_dir in candidate.resolve().parents:
-                return FileResponse(candidate)
-            return FileResponse(static_dir / "index.html")
+            candidate = frontend_dist / path
+            if path and candidate.is_file() and frontend_dist in candidate.resolve().parents:
+                headers = {}
+                if path in {"sw.js", "manifest.webmanifest", "offline.html"}:
+                    headers["Cache-Control"] = "no-cache"
+                elif path.startswith("icons/"):
+                    headers["Cache-Control"] = "public, max-age=31536000, immutable"
+                return FileResponse(candidate, headers=headers)
+            if path in {"sw.js", "manifest.webmanifest"}:
+                return JSONResponse({"detail": "Not Found"}, status_code=404)
+            return FileResponse(frontend_dist / "index.html")
 
     return application
 
