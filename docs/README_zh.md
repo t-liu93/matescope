@@ -6,6 +6,7 @@
 
 | 文档 | 用途 |
 | --- | --- |
+| [接入现有 TeslaMate Compose](operations/existing-teslamate-compose_zh.md) | 在现有安装目录添加 MateScope，仅启动新增服务 |
 | [PostgreSQL 只读配置](operations/postgresql-readonly_zh.md) | 生产系统目录预检与显式准备专用账号 |
 | [参考项目](insight/references_zh.md) | 从所有者项目中提取的经验，仅作背景，不继承其要求 |
 | [TeslaMate 洞察](insight/teslamate_zh.md) | 上游观察、产品目标和待验证问题 |

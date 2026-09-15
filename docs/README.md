@@ -6,6 +6,7 @@ Read the [agent guide](../AGENTS.md), the roadmap, and the relevant milestone be
 
 | Document | Purpose |
 | --- | --- |
+| [Add to existing TeslaMate Compose](operations/existing-teslamate-compose.md) | Add MateScope in the existing installation directory and start only its service |
 | [PostgreSQL read-only setup](operations/postgresql-readonly.md) | Production catalog preflight and explicit dedicated-account preparation |
 | [Reference projects](insight/references.md) | Lessons from the owner's projects; context, not inherited requirements |
 | [TeslaMate insight](insight/teslamate.md) | Upstream observations, intended product, and questions to validate |
