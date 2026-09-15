@@ -52,7 +52,7 @@ export function PwaStatus({ showInstall = true }: { showInstall?: boolean }) {
         <Text size="sm">{t("offlineMessage")}</Text>
         <Button mt="sm" size="xs" variant="light" onClick={() => window.location.reload()}>{t("retry")}</Button>
       </Alert>}
-      {showInstall && !installed && <Alert color="blue" title={t("installTitle")}>
+      {showInstall && !installed && <Alert color="blue" role="status" title={t("installTitle")}>
         <Group justify="space-between" align="center" wrap="wrap">
           <Text size="sm">{installPrompt ? t("installMessage") : t("installMenuMessage")}</Text>
           {installPrompt && <Button size="xs" onClick={() => void install()}>{t("install")}</Button>}

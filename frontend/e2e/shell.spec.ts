@@ -29,7 +29,7 @@ test("onboarding saves, resumes, skips and supports later editing", async ({ pag
   // Revisit the same saved wizard on the second viewport without resetting application data.
   await page.goto("/setup");
   await expect(page.getByRole("heading", { name: "Setup", exact: true })).toBeVisible();
-  for (let index = 0; index < 4; index += 1) {
+  for (let index = 0; index < 5; index += 1) {
     if (await page.getByLabel(/^Display timezone(?:\s*\*)?$/).isVisible()) break;
     const previous = await page.getByRole("region").getAttribute("aria-label");
     await page.getByRole("button", { name: "Back", exact: true }).click();
@@ -65,6 +65,8 @@ test("onboarding saves, resumes, skips and supports later editing", async ({ pag
   }
   await page.getByRole("button", { name: "Skip for now", exact: true }).click();
   await expect(page.getByRole("heading", { name: "SMTP", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Skip for now", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Two-factor authentication", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Skip for now", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Review setup", exact: true })).toBeVisible();
   await expect(page.getByText("PostgreSQL: Saved, not verified", { exact: true })).toBeVisible();
@@ -108,8 +110,8 @@ test("onboarding saves, resumes, skips and supports later editing", async ({ pag
 
   if (info.project.name === "mobile") {
     // Reusing the synthetic password still exercises the change flow and revokes the session.
-    await page.getByLabel("Current password", { exact: true }).fill(credentials.password);
-    await page.getByLabel("New password", { exact: true }).fill(credentials.password);
+    await page.getByLabel(/^Current password(?:\s*\*)?$/).fill(credentials.password);
+    await page.getByLabel(/^New password(?:\s*\*)?$/).fill(credentials.password);
     await page.getByLabel(/^Confirm password(?:\s*\*)?$/).fill(credentials.password);
     await clickAuthenticatedAction(
       page,

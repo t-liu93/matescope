@@ -137,6 +137,16 @@ def test_progress_and_settings_survive_logout_restart(tmp_path: Path) -> None:
         assert edited["onboarding"]["completed"] is True
 
 
+def test_onboarding_accepts_optional_two_factor_step_and_keeps_completion(
+    client: TestClient,
+) -> None:
+    create_admin(client)
+    saved = save(client, "onboarding", {"step": "two_factor"})
+    assert saved["onboarding"] == {"step": "two_factor", "completed": False}
+    completed = save(client, "onboarding", {"step": "review", "completed": True})
+    assert completed["onboarding"] == {"step": "review", "completed": True}
+
+
 def test_postgresql_test_auth_csrf_and_unconfigured(client: TestClient) -> None:  # noqa: F811
     endpoint = "/api/v1/settings/postgresql/test"
     assert client.post(endpoint, headers=csrf_headers(client)).status_code == 401

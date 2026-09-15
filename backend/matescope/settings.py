@@ -245,7 +245,9 @@ class SMTPResponse(SMTPFields, OptionalResponse):
 
 
 class Onboarding(InputModel):
-    step: Literal["preferences", "postgresql", "mqtt", "smtp", "review"] = "preferences"
+    step: Literal["preferences", "postgresql", "mqtt", "smtp", "two_factor", "review"] = (
+        "preferences"
+    )
     completed: bool = False
 
 

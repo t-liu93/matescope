@@ -67,6 +67,8 @@ async function mockApi(
       await route.fulfill({ json: { username: "admin" } });
     } else if (url.endsWith("/auth/csrf")) {
       await route.fulfill({ json: { csrf_token: "mock-csrf" } });
+    } else if (url.endsWith("/auth/two-factor")) {
+      await route.fulfill({ json: { enabled: false, recovery_codes_remaining: 0 } });
     } else if (url.endsWith("/settings") && request.method() === "GET") {
       await route.fulfill({ json: settings(handlers.step) });
     } else if (url.endsWith("/settings/onboarding")) {

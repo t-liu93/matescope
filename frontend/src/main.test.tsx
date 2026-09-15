@@ -218,4 +218,30 @@ describe("first administrator flow", () => {
       });
     });
   });
+
+  it("keeps a password login challenge outside the authenticated app and preserves leading zeroes", async () => {
+    window.history.pushState({}, "", "/login");
+    const requests: Array<{ url: string; body?: string }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = typeof input === "object" && input && "url" in input ? String(input.url) : String(input);
+      const body = input instanceof Request ? await input.clone().text() : typeof init?.body === "string" ? init.body : undefined;
+      requests.push({ url, body });
+      if (url.endsWith("/api/v1/setup/status")) return response({ administrator_exists: true, csrf_token: "initial" });
+      if (url.endsWith("/api/v1/auth/login")) return response({ status: "two_factor_required", csrf_token: "challenge", expires_in: 300 });
+      if (url.endsWith("/api/v1/auth/two-factor/verify")) return response({ status: "authenticated", username: "admin", csrf_token: "session" });
+      return response({ username: "admin" });
+    });
+    render(<App />);
+    await screen.findByRole("heading", { name: "Sign in" });
+    fireEvent.change(screen.getByLabelText(/^Username(?:\s*\*)?$/), { target: { value: "admin" } });
+    fireEvent.change(document.getElementById("credentials-password")!, { target: { value: "password" } });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await screen.findByRole("heading", { name: "Verify your sign-in" });
+    const code = screen.getByLabelText(/^Verification code(?:\s*\*)?$/) as HTMLInputElement;
+    expect(code.type).toBe("text");
+    expect(code.inputMode).toBe("numeric");
+    fireEvent.change(code, { target: { value: "000123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Verify" }));
+    await waitFor(() => expect(requests.find((item) => item.url.endsWith("/auth/two-factor/verify"))?.body).toBe(JSON.stringify({ method: "totp", code: "000123" })));
+  });
 });

@@ -28,8 +28,9 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { createRoot } from "react-dom/client";
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import * as QRCode from "qrcode";
 import {
   BrowserRouter,
   Link,
@@ -63,7 +64,7 @@ type ConnectionTestResult =
   | components["schemas"]["PostgreSQLTestResult"]
   | components["schemas"]["MQTTTestResult"]
   | components["schemas"]["SMTPTestResult"];
-const steps: Step[] = ["preferences", "postgresql", "mqtt", "smtp", "review"];
+const steps: Step[] = ["preferences", "postgresql", "mqtt", "smtp", "two_factor", "review"];
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false, staleTime: 0 } },
 });
@@ -76,6 +77,22 @@ function errorMessage(error: unknown, t: (key: string) => unknown): string {
     if (error.status === 422) return String(t("requestFailed"));
   }
   return String(t("requestFailed"));
+}
+
+function factorErrorMessage(error: unknown, t: (key: string) => unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 429) return String(t("twoFactorRateLimited"));
+    if (error.status === 401 && /challenge expired/i.test(error.message))
+      return String(t("twoFactorChallengeExpired"));
+    if (error.status === 401 && /verification code/i.test(error.message))
+      return String(t("twoFactorInvalidCode"));
+    if (error.status === 409 && /enrollment expired/i.test(error.message))
+      return String(t("twoFactorEnrollmentExpired"));
+    if (error.status === 401 && /current password/i.test(error.message))
+      return String(t("invalidCurrentPassword"));
+    if (error.status === 503) return String(t("twoFactorUnavailable"));
+  }
+  return errorMessage(error, t);
 }
 
 function testErrorMessage(
@@ -161,31 +178,27 @@ function Credentials() {
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [confirmationMismatch, setConfirmationMismatch] = useState(false);
-  const create = useMutation({
-    mutationFn: (values: {
-      username: string;
-      password: string;
-      confirmation: string;
-    }) =>
-      authApi.createAdministrator({
-        username: values.username,
-        password: values.password,
-        password_confirmation: values.confirmation,
-      }),
-    onSuccess: (data) => {
-      setCsrf(data.csrf_token);
-      void client.invalidateQueries({ queryKey: ["setup"] });
-      navigate("/setup", { replace: true });
-    },
-  });
-  const login = useMutation({
-    mutationFn: (values: { username: string; password: string }) =>
-      authApi.login(values),
-    onSuccess: (data) => {
-      setCsrf(data.csrf_token);
-      navigate("/", { replace: true });
-    },
-  });
+  const [twoFactorRequired, setTwoFactorRequired] = useState(false);
+  const [useRecoveryCode, setUseRecoveryCode] = useState(false);
+  const challengeActive = useRef(false);
+  const operation = useOperation();
+  const cancellation = useRef<Promise<unknown>>(Promise.resolve());
+  const [passwordPending, setPasswordPending] = useState(false);
+  const [passwordError, setPasswordError] = useState<unknown>(null);
+  const [verifyPending, setVerifyPending] = useState(false);
+  const [verifyError, setVerifyError] = useState<unknown>(null);
+  const cancel = () => {
+    operation.cancel();
+    setPassword(""); setConfirmation(""); setVerifyError(null); setVerifyPending(false); setUseRecoveryCode(false);
+    setTwoFactorRequired(false);
+    if (challengeActive.current) {
+      challengeActive.current = false;
+      cancellation.current = authApi.cancelTwoFactor().catch(() => undefined);
+    }
+  };
+  useEffect(() => () => {
+    if (challengeActive.current) void authApi.cancelTwoFactor().catch(() => undefined);
+  }, []);
   if (setup.isPending) return <Busy />;
   if (!setup.isSuccess || !setup.data)
     return (
@@ -198,7 +211,7 @@ function Credentials() {
   const creating = setup.data.administrator_exists === false;
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (create.isPending || login.isPending) return;
+    if (passwordPending) return;
     const values = new FormData(event.currentTarget);
     const formUsername = String(values.get("username") ?? "");
     const formPassword = String(values.get("password") ?? "");
@@ -206,17 +219,22 @@ function Credentials() {
     const mismatch = creating && formPassword !== formConfirmation;
     setConfirmationMismatch(mismatch);
     if (mismatch) return;
+    const live = operation.start();
+    setPasswordPending(true);
+    setPasswordError(null);
     if (creating) {
-      create.mutate({
-        username: formUsername,
-        password: formPassword,
-        confirmation: formConfirmation,
-      });
+      void cancellation.current.then(() => authApi.createAdministrator({ username: formUsername, password: formPassword, password_confirmation: formConfirmation }))
+        .then((data) => { if (!live()) return; setCsrf(data.csrf_token); void client.invalidateQueries({ queryKey: ["setup"] }); navigate("/setup", { replace: true }); })
+        .catch((error: unknown) => { if (live()) setPasswordError(error); })
+        .finally(() => { if (live()) setPasswordPending(false); });
     } else {
-      login.mutate({ username: formUsername, password: formPassword });
+      void cancellation.current.then(() => authApi.login({ username: formUsername, password: formPassword }))
+        .then((data) => { if (!live()) return; setPassword(""); setConfirmation(""); client.removeQueries({ predicate: (query) => query.queryKey[0] !== "setup" }); setCsrf(data.csrf_token); if (data.status === "two_factor_required") { challengeActive.current = true; setTwoFactorRequired(true); } else navigate("/", { replace: true }); })
+        .catch((error: unknown) => { if (live()) setPasswordError(error); })
+        .finally(() => { if (live()) setPasswordPending(false); });
     }
   };
-  const error = create.error ?? login.error;
+  const error = passwordError;
   return (
     <Container size="xs" py="xl">
       <Stack gap="lg">
@@ -226,11 +244,9 @@ function Credentials() {
         </Group>
         <Paper withBorder radius="lg" p="xl">
           <Stack>
-            <Title order={2}>
-              {creating ? t("createTitle") : t("loginTitle")}
-            </Title>
+            <Title order={2}>{creating ? t("createTitle") : twoFactorRequired ? t("twoFactorSignIn") : t("loginTitle")}</Title>
             {creating && <Text c="dimmed">{t("createIntro")}</Text>}
-            <form method="post" onSubmit={submit} noValidate={false}>
+            {!twoFactorRequired && <form method="post" onSubmit={submit} noValidate={false}>
               <Stack>
                 <TextInput
                   id="credentials-username"
@@ -277,12 +293,49 @@ function Credentials() {
                     </Text>
                   </>
                 )}
-                {error && <Alert color="red">{errorMessage(error, t)}</Alert>}
-                <Button type="submit" loading={create.isPending || login.isPending}>
+                {Boolean(error) && <Alert color="red">{errorMessage(error, t)}</Alert>}
+                <Button type="submit" loading={passwordPending}>
                   {creating ? t("create") : t("signIn")}
                 </Button>
               </Stack>
-            </form>
+            </form>}
+            {twoFactorRequired && <form method="post" onSubmit={(event) => {
+              event.preventDefault();
+              if (verifyPending) return;
+              const code = String(new FormData(event.currentTarget).get("two_factor_code") ?? "");
+              const live = operation.start();
+              event.currentTarget.reset();
+              setVerifyPending(true); setVerifyError(null);
+              void authApi.verifyTwoFactor({ method: useRecoveryCode ? "recovery_code" : "totp", code }).then((data) => {
+                if (!live()) return;
+                challengeActive.current = false; setCsrf(data.csrf_token); navigate("/", { replace: true });
+              }).catch((error: unknown) => { if (live()) setVerifyError(error); }).finally(() => { if (live()) setVerifyPending(false); });
+            }}>
+              <Stack>
+                <Text c="dimmed">{t(useRecoveryCode ? "recoveryCodeSignInHelp" : "twoFactorSignInHelp")}</Text>
+                <TextInput
+                  type="text"
+                  key={String(useRecoveryCode)}
+                  id="login-two-factor-code"
+                  name="two_factor_code"
+                  label={t(useRecoveryCode ? "recoveryCode" : "verificationCode")}
+                  autoComplete="one-time-code"
+                  inputMode={useRecoveryCode ? "text" : "numeric"}
+                  pattern={useRecoveryCode ? undefined : "[0-9]{6}"}
+                  minLength={useRecoveryCode ? undefined : 6}
+                  maxLength={useRecoveryCode ? 64 : 6}
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  required
+                />
+                {Boolean(verifyError) && <Alert color="red">{factorErrorMessage(verifyError, t)}</Alert>}
+                <Button type="submit" loading={verifyPending}>{t("verify")}</Button>
+                <Button type="button" variant="subtle" disabled={verifyPending} onClick={() => { setUseRecoveryCode((value) => !value); setVerifyError(null); }}>
+                  {t(useRecoveryCode ? "useAuthenticatorCode" : "useRecoveryCode")}
+                </Button>
+                <Button type="button" variant="subtle" color="gray" onClick={cancel}>{t("cancel")}</Button>
+              </Stack>
+            </form>}
           </Stack>
         </Paper>
       </Stack>
@@ -854,21 +907,224 @@ function FormCard({
   title,
   children,
   error,
+  factorError = false,
 }: {
   title: string;
   children: React.ReactNode;
   error?: unknown;
+  factorError?: boolean;
 }) {
   const { t } = useTranslation();
   return (
     <Paper component="section" aria-label={title} withBorder radius="lg" p="xl">
       <Stack>
         <Title order={2}>{title}</Title>
-        {Boolean(error) && <Alert color="red">{errorMessage(error, t)}</Alert>}
+        {Boolean(error) && <Alert color="red">{factorError ? factorErrorMessage(error, t) : errorMessage(error, t)}</Alert>}
         {children}
       </Stack>
     </Paper>
   );
+}
+
+// A cancelled operation can finish after another form has opened. Only the
+// current generation may publish its result, including CSRF and navigation.
+function useOperation() {
+  const generation = useRef(0);
+  useEffect(() => () => { generation.current += 1; }, []);
+  return useMemo(() => ({
+    start: () => { const id = ++generation.current; return () => generation.current === id; },
+    cancel: () => { generation.current += 1; },
+  }), []);
+}
+
+function refreshAfterFactorRotation(client: QueryClient) {
+  // Discard data from the old session without unmounting the one-time code view.
+  client.removeQueries({ predicate: (query) => !["me", "settings", "two-factor"].includes(String(query.queryKey[0])) });
+  void client.invalidateQueries({ queryKey: ["me"] });
+  void client.invalidateQueries({ queryKey: ["settings"] });
+}
+
+type FactorProof = components["schemas"]["FactorProof"];
+
+function FactorProofInputs({ id, method, setMethod, disabled = false }: {
+  id: string;
+  disabled?: boolean;
+  method: FactorProof["method"];
+  setMethod: (method: FactorProof["method"]) => void;
+}) {
+  const { t } = useTranslation();
+  return <>
+    <Select
+      disabled={disabled}
+      id={`${id}-method`}
+      name={`${id.replace("-", "_")}_method`}
+      label={t("verificationMethod")}
+      value={method}
+      onChange={(value) => setMethod(value === "recovery_code" ? "recovery_code" : "totp")}
+      data={[{ value: "totp", label: t("authenticatorCode") }, { value: "recovery_code", label: t("recoveryCode") }]}
+    />
+    <TextInput
+      key={method}
+      id={`${id}-code`}
+      name={`${id.replace("-", "_")}_code`}
+      label={t(method === "totp" ? "verificationCode" : "recoveryCode")}
+      autoComplete="one-time-code"
+      inputMode={method === "totp" ? "numeric" : "text"}
+      pattern={method === "totp" ? "[0-9]*" : undefined}
+      autoCapitalize="none"
+      spellCheck={false}
+      required
+    />
+  </>;
+}
+
+function RecoveryCodes({ codes, done }: { codes: string[]; done: () => void }) {
+  const { t } = useTranslation();
+  return <FormCard title={t("recoveryCodes")}>
+    <Alert color="yellow">{t("recoveryCodesOnce")}</Alert>
+    <Text component="pre" style={{ whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{codes.join("\n")}</Text>
+    <Button onClick={done}>{t("recoveryCodesSaved")}</Button>
+  </FormCard>;
+}
+
+function TwoFactorEnrollment({ done, showRecoveryCodes }: { done: () => void; showRecoveryCodes: (codes: string[]) => void }) {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const [enrollment, setEnrollment] = useState<components["schemas"]["EnrollmentResponse"] | null>(null);
+  const [qr, setQr] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const operation = useOperation();
+  useEffect(() => {
+    if (!enrollment) return;
+    let live = true;
+    void QRCode.toDataURL(enrollment.provisioning_uri, { margin: 1, width: 256 })
+      .then((url) => { if (live) setQr(url); })
+      .catch(() => { if (live) setQr(""); });
+    const expiry = window.setTimeout(() => {
+      operation.cancel(); setPending(false); setEnrollment(null); setQr(""); setError(new ApiError(409, "Two-factor enrollment expired or invalid"));
+    }, enrollment.expires_in * 1000);
+    return () => { live = false; window.clearTimeout(expiry); };
+  }, [enrollment, operation]);
+  const cancel = () => {
+    operation.cancel(); setEnrollment(null); setQr(""); setError(null); setPending(false); done();
+  };
+  if (!enrollment) return <FormCard title={t("enableTwoFactor")} error={error} factorError>
+    <form method="post" onSubmit={(event) => {
+      event.preventDefault();
+      if (pending) return;
+      const live = operation.start();
+      const password = String(new FormData(event.currentTarget).get("current_password") ?? "");
+      event.currentTarget.reset();
+      setPending(true); setError(null);
+      void authApi.enrollTwoFactor(password)
+        .then((data) => { if (live()) setEnrollment(data); })
+        .catch((reason: unknown) => { if (live()) setError(reason); })
+        .finally(() => { if (live()) setPending(false); });
+    }}><Stack>
+      <Text c="dimmed">{t("twoFactorEnrollHelp")}</Text>
+      <PasswordInput id="two-factor-enroll-password" name="current_password" label={t("currentPassword")} autoComplete="current-password" required />
+      <Group grow><Button type="submit" loading={pending}>{t("continue")}</Button><Button type="button" variant="light" onClick={cancel}>{t("cancel")}</Button></Group>
+    </Stack></form>
+  </FormCard>;
+  return <FormCard title={t("scanAuthenticator")} error={error} factorError>
+    <Stack>
+      <Text c="dimmed">{t("twoFactorEnrollmentExpiry")}</Text>
+      {qr ? <img src={qr} alt={t("twoFactorQrAlt")} width="256" height="256" style={{ maxWidth: "100%", height: "auto" }} /> : <Text>{t("loading")}</Text>}
+      <Text style={{ overflowWrap: "anywhere" }}>{t("manualSecret")}: <code>{enrollment.secret}</code></Text>
+      <form method="post" onSubmit={(event) => {
+        event.preventDefault();
+        if (pending) return;
+        const values = new FormData(event.currentTarget);
+        const live = operation.start();
+        event.currentTarget.reset();
+        setPending(true); setError(null);
+        void authApi.confirmTwoFactor({ current_password: String(values.get("current_password") ?? ""), code: String(values.get("verification_code") ?? "") })
+          .then((data) => {
+            if (!live()) return;
+            setCsrf(data.csrf_token); setEnrollment(null); setQr(""); showRecoveryCodes(data.recovery_codes);
+            refreshAfterFactorRotation(qc);
+          })
+          .catch((reason: unknown) => {
+            if (!live()) return;
+            setError(reason);
+            if (reason instanceof ApiError && reason.status === 409) { setEnrollment(null); setQr(""); }
+          })
+          .finally(() => { if (live()) setPending(false); });
+      }}><Stack>
+        <PasswordInput id="two-factor-confirm-password" name="current_password" label={t("currentPassword")} autoComplete="current-password" required />
+        <TextInput id="two-factor-confirm-code" name="verification_code" label={t("verificationCode")} autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" minLength={6} maxLength={6} required />
+        <Group grow><Button type="submit" loading={pending}>{t("enableTwoFactor")}</Button><Button type="button" variant="light" onClick={cancel}>{t("cancel")}</Button></Group>
+      </Stack></form>
+    </Stack>
+  </FormCard>;
+}
+
+function TwoFactorSettings({ afterContinue }: { afterContinue?: () => void } = {}) {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const status = useQuery({ queryKey: ["two-factor"], queryFn: authApi.twoFactorStatus });
+  const [mode, setMode] = useState<"idle" | "enroll" | "disable" | "recovery">("idle");
+  const [method, setMethod] = useState<FactorProof["method"]>("totp");
+  const [codes, setCodes] = useState<string[] | null>(null);
+  const [managementPending, setManagementPending] = useState(false);
+  const [managementError, setManagementError] = useState<unknown>(null);
+  const operation = useOperation();
+  const finishEnrollment = () => {
+    setCodes(null); setMode("idle");
+    void qc.invalidateQueries({ queryKey: ["two-factor"] });
+  };
+  // Local enrollment owns its lifetime, including while confirmation is pending.
+  // Background status success or failure must not discard the one-time response.
+  if (codes) return <RecoveryCodes codes={codes} done={finishEnrollment} />;
+  if (mode === "enroll") return <Stack>
+    <TwoFactorEnrollment done={finishEnrollment} showRecoveryCodes={setCodes} />
+    {afterContinue && <Button variant="light" onClick={afterContinue}>{t("skip")}</Button>}
+  </Stack>;
+  if (status.isPending) return <Busy />;
+  if (status.error || !status.data) return <FormCard title={t("twoFactorAuthentication")} error={status.error}><Text>{t("requestFailed")}</Text></FormCard>;
+  if (!status.data.enabled) return <Stack>
+    <FormCard title={t("twoFactorAuthentication")}><Text>{t("twoFactorDisabled")}</Text><Button onClick={() => setMode("enroll")}>{t("enableTwoFactor")}</Button></FormCard>
+    {afterContinue && <Button variant="light" onClick={afterContinue}>{t("skip")}</Button>}
+  </Stack>;
+  if (mode === "idle") return <FormCard title={t("twoFactorAuthentication")}>
+    <Text>{t("twoFactorEnabled")}</Text>
+    <Text>{t("recoveryCodesRemaining", { count: status.data.recovery_codes_remaining })}</Text>
+    {status.data.recovery_codes_remaining === 0 && <Alert color="yellow">{t("recoveryCodesEmpty")}</Alert>}
+    {afterContinue ? <Button onClick={afterContinue}>{t("continue")}</Button>
+      : <Group grow><Button variant="light" onClick={() => setMode("recovery")}>{t("regenerateRecoveryCodes")}</Button><Button color="red" variant="light" onClick={() => setMode("disable")}>{t("disableTwoFactor")}</Button></Group>}
+  </FormCard>;
+  return <FormCard title={mode === "disable" ? t("disableTwoFactor") : t("regenerateRecoveryCodes")} error={managementError} factorError>
+    <form method="post" onSubmit={(event) => {
+      event.preventDefault();
+      if (managementPending) return;
+      const values = new FormData(event.currentTarget);
+      const body = { current_password: String(values.get("current_password") ?? ""), proof: { method, code: String(values.get("management_code") ?? "") } };
+      const live = operation.start();
+      event.currentTarget.reset();
+      setManagementPending(true); setManagementError(null);
+      const action = mode === "disable" ? authApi.disableTwoFactor(body) : authApi.regenerateRecoveryCodes(body);
+      void action.then((data) => {
+        if (!live()) return;
+        if (mode === "disable") { qc.clear(); navigate("/login"); return; }
+        const response = data as components["schemas"]["RecoveryCodesResponse"];
+        setCsrf(response.csrf_token); setCodes(response.recovery_codes);
+        refreshAfterFactorRotation(qc);
+        void qc.invalidateQueries({ queryKey: ["two-factor"] });
+      }).catch((reason: unknown) => { if (live()) setManagementError(reason); })
+        .finally(() => { if (live()) setManagementPending(false); });
+    }}><Stack>
+      <Alert color="yellow">{t(mode === "disable" ? "disableTwoFactorNotice" : "regenerateRecoveryCodesNotice")}</Alert>
+      <PasswordInput id="two-factor-management-password" name="current_password" label={t("currentPassword")} autoComplete="current-password" required />
+      <FactorProofInputs id="management" method={method} setMethod={setMethod} disabled={managementPending} />
+      <Group grow><Button type="submit" color={mode === "disable" ? "red" : undefined} loading={managementPending}>{t("confirm")}</Button><Button type="button" variant="light" onClick={() => { operation.cancel(); setMode("idle"); setMethod("totp"); setManagementPending(false); setManagementError(null); void qc.invalidateQueries({ queryKey: ["two-factor"] }); }}>{t("cancel")}</Button></Group>
+    </Stack></form>
+  </FormCard>;
+}
+
+function TwoFactorOnboarding({ afterContinue }: { afterContinue: () => void }) {
+  return <TwoFactorSettings afterContinue={afterContinue} />;
 }
 
 function Setup() {
@@ -885,7 +1141,9 @@ function Setup() {
     },
   });
   if (settings.isPending) return <Busy />;
-  if (settings.error || !settings.data?.onboarding)
+  if (settings.error instanceof ApiError && settings.error.status === 401)
+    return <Navigate to="/login" replace />;
+  if (!settings.data?.onboarding)
     return (
       <ReadFailure
         retry={() => void settings.refetch()}
@@ -900,6 +1158,8 @@ function Setup() {
   const content =
     current === "preferences" ? (
       <Preferences settings={settings.data} afterSave={next} />
+    ) : current === "two_factor" ? (
+      <TwoFactorOnboarding afterContinue={next} />
     ) : current === "review" ? (
       <Review
         settings={settings.data}
@@ -917,6 +1177,7 @@ function Setup() {
   return (
     <Container size="sm" py="xl">
       <Stack gap="lg">
+        {settings.error && <ReadFailure retry={() => void settings.refetch()} pending={settings.isFetching} />}
         <Group justify="space-between">
           <Title order={1}>{t("setup")}</Title>
           <LanguageButton />
@@ -1015,7 +1276,9 @@ function SettingsPage() {
     },
   });
   if (settings.isPending) return <Busy />;
-  if (settings.error || !settings.data)
+  if (settings.error instanceof ApiError && settings.error.status === 401)
+    return <Navigate to="/login" replace />;
+  if (!settings.data)
     return (
       <ReadFailure
         retry={() => void settings.refetch()}
@@ -1025,6 +1288,7 @@ function SettingsPage() {
   return (
     <Container size="sm" py="xl">
       <Stack gap="lg">
+        {settings.error && <ReadFailure retry={() => void settings.refetch()} pending={settings.isFetching} />}
         <Title order={1}>{t("settings")}</Title>
         {logout.error && (
           <Alert color="red">{errorMessage(logout.error, t)}</Alert>
@@ -1034,6 +1298,7 @@ function SettingsPage() {
         <Connection kind="mqtt" settings={settings.data} />
         <Connection kind="smtp" settings={settings.data} />
         <PasswordChange />
+        <TwoFactorSettings />
         <Button variant="light" component={Link} to="/setup">
           {t("setup")}
         </Button>
@@ -1058,25 +1323,15 @@ function PasswordChange() {
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
   const [confirmationMismatch, setConfirmationMismatch] = useState(false);
-  const mutation = useMutation({
-    mutationFn: (values: {
-      current: string;
-      next: string;
-      confirm: string;
-    }) =>
-      authApi.changePassword({
-        current_password: values.current,
-        new_password: values.next,
-        password_confirmation: values.confirm,
-      }),
-    onSuccess: () => {
-      qc.clear();
-      navigate("/login");
-    },
-  });
+  const [method, setMethod] = useState<FactorProof["method"]>("totp");
+  const factor = useQuery({ queryKey: ["two-factor"], queryFn: authApi.twoFactorStatus });
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (mutation.isPending) return;
+    if (pending) return;
     const values = new FormData(event.currentTarget);
     const formCurrent = String(values.get("current_password") ?? "");
     const formNext = String(values.get("new_password") ?? "");
@@ -1084,10 +1339,17 @@ function PasswordChange() {
     const mismatch = formNext !== formConfirm;
     setConfirmationMismatch(mismatch);
     if (mismatch) return;
-    mutation.mutate({ current: formCurrent, next: formNext, confirm: formConfirm });
+    const proofCode = String(values.get("password_proof_code") ?? "");
+    setPending(true); setError(null);
+    void authApi.changePassword({ current_password: formCurrent, new_password: formNext,
+      password_confirmation: formConfirm,
+      ...(factor.data?.enabled ? { proof: { method, code: proofCode } } : {}) })
+      .then(() => { if (mounted.current) { qc.clear(); navigate("/login"); } })
+      .catch((reason: unknown) => { if (mounted.current) setError(reason); })
+      .finally(() => { if (mounted.current) setPending(false); });
   };
   return (
-    <FormCard title={t("changePassword")} error={mutation.error}>
+    <FormCard title={t("changePassword")} error={error} factorError>
       <form method="post" onSubmit={submit}>
         <Stack>
           <Text c="dimmed">{t("changePasswordNotice")}</Text>
@@ -1100,6 +1362,10 @@ function PasswordChange() {
             autoComplete="current-password"
             required
           />
+          {factor.data?.enabled && <>
+            <Alert color="yellow">{t("passwordTwoFactorRequired")}</Alert>
+            <FactorProofInputs id="password-proof" method={method} setMethod={setMethod} disabled={pending} />
+          </>}
           <PasswordInput
             id="change-password-new"
             name="new_password"
@@ -1126,7 +1392,7 @@ function PasswordChange() {
             }
             required
           />
-          <Button type="submit" loading={mutation.isPending}>
+          <Button type="submit" loading={pending}>
             {t("updatePassword")}
           </Button>
         </Stack>
@@ -1166,11 +1432,16 @@ function Protected({ children }: { children: React.ReactNode }) {
   if (me.isPending) return <Busy />;
   if (me.error instanceof ApiError && me.error.status === 401)
     return <Navigate to="/login" replace />;
-  if (me.error || !me.data)
+  if (!me.data)
     return (
       <ReadFailure retry={() => void me.refetch()} pending={me.isFetching} />
     );
-  return <>{children}</>;
+  // A transient refetch error must not unmount local forms or one-time secrets.
+  // A confirmed 401 above still discards the protected subtree immediately.
+  return <>
+    {me.error && <ReadFailure retry={() => void me.refetch()} pending={me.isFetching} />}
+    {children}
+  </>;
 }
 
 function Shell() {
@@ -1244,10 +1515,10 @@ function Shell() {
   );
 }
 
-function App() {
+function App({ client = queryClient }: { client?: QueryClient }) {
   return (
     <MantineProvider defaultColorScheme="auto">
-      <QueryClientProvider client={queryClient}>
+      <QueryClientProvider client={client}>
         <BrowserRouter>
           <Shell />
         </BrowserRouter>

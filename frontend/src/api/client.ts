@@ -98,16 +98,48 @@ export function setCsrf(token: string) {
   csrfToken = token;
 }
 
+async function oneTimePost<T>(path: string, body?: unknown): Promise<T> {
+  // Authentication proofs can be consumed by the server. Never replay them.
+  if (!csrfToken) await refreshCsrf();
+  const submittedCsrf = csrfToken;
+  const response = await fetch(`${window.location.origin}${path}`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json", "X-CSRF-Token": submittedCsrf },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { detail?: unknown } | null;
+    if (response.status === 403 && typeof payload?.detail === "string" && /csrf/i.test(payload.detail) && csrfToken === submittedCsrf) csrfToken = "";
+    throw new ApiError(response.status, typeof payload?.detail === "string"
+      ? payload.detail : response.statusText || "Request failed");
+  }
+  if (response.status === 204) return undefined as T;
+  return (await response.json()) as T;
+}
+
 export const authApi = {
   setupStatus: () => unwrap(api.GET("/api/v1/setup/status")),
   me: () => unwrap(api.GET("/api/v1/auth/me")),
   createAdministrator: (body: components["schemas"]["CreateAdminInput"]) =>
-    unwrap(api.POST("/api/v1/setup/administrator", { body })),
+    oneTimePost<components["schemas"]["AuthResponse"]>("/api/v1/setup/administrator", body),
   login: (body: components["schemas"]["LoginInput"]) =>
-    unwrap(api.POST("/api/v1/auth/login", { body })),
+    oneTimePost<components["schemas"]["ChallengeResponse"] | components["schemas"]["AuthResponse"]>("/api/v1/auth/login", body),
   logout: () => unwrap(api.POST("/api/v1/auth/logout")),
   changePassword: (body: components["schemas"]["ChangePasswordInput"]) =>
-    unwrap(api.POST("/api/v1/auth/password", { body })),
+    oneTimePost<void>("/api/v1/auth/password", body),
+  twoFactorStatus: () => unwrap(api.GET("/api/v1/auth/two-factor")),
+  verifyTwoFactor: (body: components["schemas"]["FactorProof"]) =>
+    oneTimePost<components["schemas"]["AuthResponse"]>("/api/v1/auth/two-factor/verify", body),
+  cancelTwoFactor: () => oneTimePost<void>("/api/v1/auth/two-factor/cancel"),
+  enrollTwoFactor: (current_password: string) =>
+    oneTimePost<components["schemas"]["EnrollmentResponse"]>("/api/v1/auth/two-factor/enroll", { current_password }),
+  confirmTwoFactor: (body: components["schemas"]["ConfirmInput"]) =>
+    oneTimePost<components["schemas"]["RecoveryCodesResponse"]>("/api/v1/auth/two-factor/confirm", body),
+  disableTwoFactor: (body: components["schemas"]["ManagementInput"]) =>
+    oneTimePost<void>("/api/v1/auth/two-factor/disable", body),
+  regenerateRecoveryCodes: (body: components["schemas"]["ManagementInput"]) =>
+    oneTimePost<components["schemas"]["RecoveryCodesResponse"]>("/api/v1/auth/two-factor/recovery-codes", body),
 };
 
 export const settingsApi = {

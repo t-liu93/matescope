@@ -883,7 +883,7 @@ export interface components {
              * @default preferences
              * @enum {string}
              */
-            step: "preferences" | "postgresql" | "mqtt" | "smtp" | "review";
+            step: "preferences" | "postgresql" | "mqtt" | "smtp" | "two_factor" | "review";
             /**
              * Completed
              * @default false
