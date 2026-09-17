@@ -1,5 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import { Alert, Button, Group, Stack, Text } from "@mantine/core";
+import type { QueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -12,9 +13,46 @@ declare global {
   interface WindowEventMap { beforeinstallprompt: BeforeInstallPromptEvent; }
 }
 
+const vehicleQueryKeys = new Set(["vehicles", "trips", "charges", "trajectory"]);
+
+export function isVehicleDataQuery(queryKey: readonly unknown[]) {
+  return vehicleQueryKeys.has(String(queryKey[0]));
+}
+
+export function clearVehicleData(client: QueryClient) {
+  const filters = { predicate: (query: { queryKey: readonly unknown[] }) => isVehicleDataQuery(query.queryKey) };
+  void client.cancelQueries(filters);
+  client.removeQueries(filters);
+}
+
+export function useOnlineStatus() {
+  const [online, setOnline] = useState(() => navigator.onLine);
+  useEffect(() => {
+    const goOnline = () => setOnline(true);
+    const goOffline = () => setOnline(false);
+    window.addEventListener("online", goOnline);
+    window.addEventListener("offline", goOffline);
+    return () => {
+      window.removeEventListener("online", goOnline);
+      window.removeEventListener("offline", goOffline);
+    };
+  }, []);
+  return online;
+}
+
+/** Vehicle records are intentionally memory-only while the browser is online. */
+export function useOfflineVehicleDataGuard(client: QueryClient) {
+  const online = useOnlineStatus();
+  useEffect(() => {
+    if (online) return;
+    clearVehicleData(client);
+  }, [client, online]);
+  return online;
+}
+
 export function PwaStatus({ showInstall = true }: { showInstall?: boolean }) {
   const { t } = useTranslation();
-  const [online, setOnline] = useState(() => navigator.onLine);
+  const online = useOnlineStatus();
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [installed, setInstalled] = useState(() =>
     window.matchMedia("(display-mode: standalone)").matches ||
@@ -22,17 +60,11 @@ export function PwaStatus({ showInstall = true }: { showInstall?: boolean }) {
   );
 
   useEffect(() => {
-    const goOnline = () => setOnline(true);
-    const goOffline = () => setOnline(false);
     const installedHandler = () => { setInstalled(true); setInstallPrompt(null); };
     const promptHandler = (event: BeforeInstallPromptEvent) => { event.preventDefault(); setInstallPrompt(event); };
-    window.addEventListener("online", goOnline);
-    window.addEventListener("offline", goOffline);
     window.addEventListener("appinstalled", installedHandler);
     window.addEventListener("beforeinstallprompt", promptHandler);
     return () => {
-      window.removeEventListener("online", goOnline);
-      window.removeEventListener("offline", goOffline);
       window.removeEventListener("appinstalled", installedHandler);
       window.removeEventListener("beforeinstallprompt", promptHandler);
     };

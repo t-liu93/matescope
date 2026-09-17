@@ -20,6 +20,7 @@ import { ApiError, historyApi, settingsApi, type HistoryWindow } from "./api/cli
 import type { components } from "./api/schema";
 import { defaultWindow, groupTrajectory, validateWindow } from "./history-utils";
 import i18n from "./i18n";
+import { useOnlineStatus } from "./pwa";
 
 type Trip = components["schemas"]["Trip"];
 type Charge = components["schemas"]["Charge"];
@@ -68,19 +69,26 @@ function HistoryFailure({ retry }: { retry: () => void }) {
   );
 }
 
+function OfflineVehicleData() {
+  const { t } = useTranslation();
+  return <Container py="xl"><Alert color="yellow">{t("offlineVehicleData")}</Alert></Container>;
+}
+
 function HistoryFilters({
   window,
   setWindow,
   apply,
   clear,
+  online,
 }: {
   window: HistoryWindow;
   setWindow: (window: HistoryWindow) => void;
   apply: () => void;
   clear: () => void;
+  online: boolean;
 }) {
   const { t } = useTranslation();
-  const vehicles = useQuery({ queryKey: ["vehicles"], queryFn: historyApi.vehicles });
+  const vehicles = useQuery({ queryKey: ["vehicles"], queryFn: historyApi.vehicles, enabled: online });
   const [message, setMessage] = useState<string | null>(null);
   const options = vehicles.data?.items.map((vehicle) => ({
     value: String(vehicle.id),
@@ -137,12 +145,13 @@ function HistoryList({ kind }: { kind: "trips" | "charges" }) {
   const [cursors, setCursors] = useState<string[]>([]);
   const cursor = cursors.at(-1);
   const preferences = useHistorySettings();
+  const online = useOnlineStatus();
   const query = useQuery<HistoryPage>({
     queryKey: [kind, active, cursor],
     queryFn: () => kind === "trips"
       ? historyApi.trips({ ...active, cursor })
       : historyApi.charges({ ...active, cursor }),
-    enabled: Boolean(preferences.data?.preferences?.saved),
+    enabled: online && Boolean(preferences.data?.preferences?.saved),
   });
   const apply = () => { setCursors([]); setActive(draft); };
   const clear = () => {
@@ -152,6 +161,7 @@ function HistoryList({ kind }: { kind: "trips" | "charges" }) {
     setActive(reset);
   };
   const page = query.data;
+  if (!online) return <OfflineVehicleData />;
   if (preferences.isPending) return <Container py="xl"><Text>{t("loading")}</Text></Container>;
   if (preferences.error || !preferences.data?.preferences?.saved)
     return <Container py="xl"><HistoryFailure retry={() => void preferences.refetch()} /></Container>;
@@ -161,7 +171,7 @@ function HistoryList({ kind }: { kind: "trips" | "charges" }) {
       <Stack gap="lg">
         <Title order={1}>{t(kind)}</Title>
         <Text size="sm" c="dimmed">{t("timesShownIn", { timezone })}</Text>
-        <HistoryFilters window={draft} setWindow={setDraft} apply={apply} clear={clear} />
+        <HistoryFilters window={draft} setWindow={setDraft} apply={apply} clear={clear} online={online} />
         {query.isPending && <Text>{t("loading")}</Text>}
         {query.error && <HistoryFailure retry={() => void query.refetch()} />}
         {page?.items.length === 0 && <Alert>{t("noHistory")}</Alert>}
@@ -205,15 +215,17 @@ function HistoryDetail({ kind }: { kind: "trips" | "charges" }) {
   const params = useParams();
   const identifier = Number(params.id);
   const settings = useHistorySettings();
+  const online = useOnlineStatus();
   const detail = useQuery<Trip | Charge>({
     queryKey: [kind, identifier],
     queryFn: () => kind === "trips" ? historyApi.trip(identifier) : historyApi.charge(identifier),
-    enabled: Number.isInteger(identifier) && identifier > 0 && Boolean(settings.data?.preferences?.saved),
+    enabled: online && Number.isInteger(identifier) && identifier > 0 && Boolean(settings.data?.preferences?.saved),
   });
-  const trajectory = useQuery({ queryKey: ["trajectory", identifier], queryFn: () => historyApi.trajectory(identifier), enabled: kind === "trips" && detail.isSuccess && Boolean(settings.data?.preferences?.saved) });
+  const trajectory = useQuery({ queryKey: ["trajectory", identifier], queryFn: () => historyApi.trajectory(identifier), enabled: online && kind === "trips" && detail.isSuccess && Boolean(settings.data?.preferences?.saved) });
   const [mapModuleFailed, setMapModuleFailed] = useState(false);
   const [tileFailed, setTileFailed] = useState(false);
   if (!Number.isInteger(identifier) || identifier <= 0) return <Container py="xl"><Alert color="red">{t("historyNotFound")}</Alert></Container>;
+  if (!online) return <OfflineVehicleData />;
   if (settings.isPending) return <Container py="xl"><Text>{t("loading")}</Text></Container>;
   if (settings.error || !settings.data?.preferences?.saved)
     return <Container py="xl"><HistoryFailure retry={() => void settings.refetch()} /></Container>;
@@ -241,11 +253,13 @@ function HistoryDetail({ kind }: { kind: "trips" | "charges" }) {
 export function VehiclesPage() {
   const { t } = useTranslation();
   const settings = useHistorySettings();
+  const online = useOnlineStatus();
   const vehicles = useQuery({
     queryKey: ["vehicles"],
     queryFn: historyApi.vehicles,
-    enabled: Boolean(settings.data?.preferences?.saved),
+    enabled: online && Boolean(settings.data?.preferences?.saved),
   });
+  if (!online) return <OfflineVehicleData />;
   if (settings.isPending) return <Container py="xl"><Text>{t("loading")}</Text></Container>;
   if (settings.error || !settings.data?.preferences?.saved)
     return <Container py="xl"><HistoryFailure retry={() => void settings.refetch()} /></Container>;

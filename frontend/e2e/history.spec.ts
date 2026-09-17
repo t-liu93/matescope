@@ -66,24 +66,36 @@ async function saveSyntheticPostgres(page: Page) {
 async function finishOnboarding(page: Page) {
   await page.goto("/setup");
   await expect(page.getByRole("heading", { name: "Setup", exact: true })).toBeVisible();
-  const preferences = page.getByRole("region", { name: "Preferences", exact: true });
-  if (await preferences.isVisible().catch(() => false)) {
-    await preferences.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(page.getByRole("region", { name: "PostgreSQL", exact: true })).toBeVisible();
-  }
-  const pg = page.getByRole("region", { name: "PostgreSQL", exact: true });
-  if (await pg.isVisible().catch(() => false)) {
-    await pg.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(page.getByRole("region", { name: "MQTT", exact: true })).toBeVisible();
-  }
-  const mqtt = page.getByRole("region", { name: "MQTT", exact: true });
-  if (await mqtt.isVisible().catch(() => false)) {
-    await mqtt.getByRole("button", { name: "Skip for now", exact: true }).click();
-    await expect(page.getByRole("region", { name: "SMTP", exact: true })).toBeVisible();
-  }
-  const smtp = page.getByRole("region", { name: "SMTP", exact: true });
-  if (await smtp.isVisible().catch(() => false)) {
-    await smtp.getByRole("button", { name: "Skip for now", exact: true }).click();
+  const steps = ["Preferences", "PostgreSQL", "MQTT", "SMTP", "Two-factor authentication", "Review setup"] as const;
+  type SetupStep = (typeof steps)[number];
+  const currentStep = async (previous?: SetupStep): Promise<SetupStep> => {
+    let observed: SetupStep | null = null;
+    await expect.poll(async () => {
+      observed = null;
+      for (const step of steps) {
+        if (step !== previous && await page.getByRole("heading", { name: step, exact: true }).isVisible()) {
+          observed = step;
+          return step;
+        }
+      }
+      return null;
+    }, { timeout: 15_000 }).toMatch(/^(Preferences|PostgreSQL|MQTT|SMTP|Two-factor authentication|Review setup)$/);
+    if (observed === null) throw new Error("Setup step was not rendered");
+    return observed;
+  };
+
+  // Confirm each rendered step after navigation. This also handles a persisted
+  // onboarding state that already starts at Review setup.
+  for (;;) {
+    const step = await currentStep();
+    if (step === "Review setup") break;
+    const region = page.getByRole("region", { name: step, exact: true });
+    const action = step === "Preferences" || step === "PostgreSQL" ? "Save" : "Skip for now";
+    const button = step === "Two-factor authentication"
+      ? page.getByRole("button", { name: action, exact: true })
+      : region.getByRole("button", { name: action, exact: true });
+    await button.click();
+    await currentStep(step);
   }
   const review = page.getByRole("region", { name: "Review setup", exact: true });
   await expect(review).toBeVisible();

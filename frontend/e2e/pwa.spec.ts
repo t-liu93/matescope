@@ -26,6 +26,55 @@ async function mockLoginSetup(context: BrowserContext) {
   });
 }
 
+async function mockVehicleHistory(context: BrowserContext, delayTrip = false) {
+  let releaseTrip: () => void = () => {};
+  const tripReady = new Promise<void>((resolve) => { releaseTrip = resolve; });
+  let completeLateTripResponse: () => void = () => {};
+  const lateTripResponseCompleted = new Promise<void>((resolve) => { completeLateTripResponse = resolve; });
+  let tripDetailRequests = 0;
+  await context.route("**/api/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/auth/me")) return route.fulfill({ json: { username: "admin" } });
+    if (path.endsWith("/settings")) return route.fulfill({ json: {
+      preferences: { language: "en", timezone: "UTC", tile_url: "https://tiles.example/{z}/{x}/{y}.png", saved: true },
+      onboarding: { step: "review", completed: true },
+    } });
+    if (path.endsWith("/vehicles")) return route.fulfill({ json: {
+      items: [{ id: 1, name: "SYNTHETIC Atlas", model: "Model 3" }],
+    } });
+    if (path.endsWith("/trips")) return route.fulfill({ json: {
+      items: [{ id: 1, vehicle_id: 1, start: "2026-09-17T10:00:00Z", end: "2026-09-17T11:00:00Z", duration_min: 60, distance_km: 12.5, speed_max_kmh: 72 }],
+      next_cursor: null,
+    } });
+    if (path.endsWith("/charges")) return route.fulfill({ json: {
+      items: [{ id: 1, vehicle_id: 1, start: "2026-09-17T10:00:00Z", end: "2026-09-17T11:00:00Z", duration_min: 60, energy_added_kwh: 22.5 }],
+      next_cursor: null,
+    } });
+    if (/\/trips\/1$/.test(path)) {
+      tripDetailRequests += 1;
+      if (delayTrip) await tripReady;
+      try {
+        await route.fulfill({ json: {
+          id: 1, vehicle_id: 1, start: "2026-09-17T10:00:00Z", end: "2026-09-17T11:00:00Z", duration_min: 60,
+          distance_km: tripDetailRequests === 1 ? 12.5 : 25, speed_max_kmh: 72,
+        } });
+      } finally {
+        if (delayTrip) completeLateTripResponse();
+      }
+      return;
+    }
+    if (path.endsWith("/trajectory")) return route.fulfill({ json: {
+      trip_id: 1, points: [{ id: 1, time: "2026-09-17T10:00:00Z", latitude: 52.1, longitude: 4.3, segment_id: 0 }], simplified: false, total_points: 1,
+    } });
+    return route.fulfill({ status: 404, json: { detail: "unexpected request" } });
+  });
+  return {
+    releaseTrip,
+    lateTripResponseCompleted,
+    tripDetailRequests: () => tripDetailRequests,
+  };
+}
+
 test("controlled production worker only caches the offline allowlist and never rewrites API navigation", async ({ page, context }) => {
   await waitForWorkerControl(page);
   await page.evaluate(async () => {
@@ -84,6 +133,51 @@ test("login status survives offline and worker updates wait for the user before 
   await expect.poll(() => verification.evaluate(async () => (await caches.keys()).sort()))
     .toEqual(["matescope-offline-v3", "unrelated-cache"]);
   await verification.close();
+});
+
+test("offline hides every vehicle-data route and reconnecting fetches a new detail value", async ({ page, context }) => {
+  const history = await mockVehicleHistory(context);
+  await waitForWorkerControl(page);
+  await page.goto("/trips/1");
+  await expect(page.getByText(/12\.5 km/)).toBeVisible();
+  await expect(page.getByText("Route", { exact: true })).toBeVisible();
+
+  await context.setOffline(true);
+  await expect(page.getByText("Vehicle data is unavailable while offline. Reconnect to load it again.")).toBeVisible();
+  await expect(page.getByText(/12\.5 km/)).toHaveCount(0);
+  await expect(page.getByText("Route", { exact: true })).toHaveCount(0);
+  for (const route of ["/vehicles", "/trips", "/charges"]) {
+    await page.evaluate((nextRoute) => {
+      window.history.pushState({}, "", nextRoute);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }, route);
+    await expect(page).toHaveURL(new RegExp(`${route}$`));
+    await expect(page.getByText("Vehicle data is unavailable while offline. Reconnect to load it again.")).toBeVisible();
+    await expect(page.getByText(/SYNTHETIC Atlas|12\.5 km|22\.5 kWh/)).toHaveCount(0);
+  }
+
+  await context.setOffline(false);
+  await page.goto("/trips/1");
+  await expect(page.getByText(/25 km/)).toBeVisible();
+  await expect(page.getByText(/12\.5 km/)).toHaveCount(0);
+  expect(history.tripDetailRequests()).toBe(2);
+});
+
+test("a trip response that arrives after offline cannot restore vehicle data", async ({ page, context }) => {
+  const history = await mockVehicleHistory(context, true);
+  await waitForWorkerControl(page);
+  await page.goto("/trips/1");
+  await expect(page.getByText("Loading…", { exact: true })).toBeVisible();
+
+  await context.setOffline(true);
+  await expect(page.getByText("Vehicle data is unavailable while offline. Reconnect to load it again.")).toBeVisible();
+  history.releaseTrip();
+  await history.lateTripResponseCompleted;
+  await expect(page.getByText(/12\.5 km/)).toHaveCount(0);
+
+  await context.setOffline(false);
+  await expect(page.getByText(/25 km/)).toBeVisible();
+  await expect(page.getByText(/12\.5 km/)).toHaveCount(0);
 });
 
 async function activateUpdatedWorker(context: BrowserContext) {

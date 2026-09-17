@@ -51,7 +51,7 @@ import {
 } from "./history";
 import type { components } from "./api/schema";
 import i18n from "./i18n";
-import { PwaStatus, registerPwa } from "./pwa";
+import { PwaStatus, registerPwa, useOfflineVehicleDataGuard } from "./pwa";
 
 type Settings = components["schemas"]["SettingsResponse"];
 type Step = components["schemas"]["Onboarding"]["step"];
@@ -1516,6 +1516,7 @@ function Shell() {
 }
 
 function App({ client = queryClient }: { client?: QueryClient }) {
+  useOfflineVehicleDataGuard(client);
   return (
     <MantineProvider defaultColorScheme="auto">
       <QueryClientProvider client={client}>
