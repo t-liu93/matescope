@@ -13,7 +13,25 @@ declare global {
   interface WindowEventMap { beforeinstallprompt: BeforeInstallPromptEvent; }
 }
 
-const vehicleQueryKeys = new Set(["vehicles", "trips", "charges", "trajectory"]);
+// These are the only query families that may contain vehicle records, names,
+// locations, or derived history. Keep future M1 history endpoints in this
+// list before a component starts issuing them so logout/offline cleanup stays
+// privacy-safe by construction.
+const vehicleQueryKeys = new Set([
+  "vehicles",
+  "trips",
+  "charges",
+  "trip",
+  "charge",
+  "trajectory",
+  "history-capabilities",
+  "history-window",
+  "trip-summary",
+  "charge-summary",
+  "latest-values",
+  "trip-series",
+  "charge-series",
+]);
 
 export function isVehicleDataQuery(queryKey: readonly unknown[]) {
   return vehicleQueryKeys.has(String(queryKey[0]));

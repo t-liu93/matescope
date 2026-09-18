@@ -4,12 +4,21 @@ import { describe, expect, it } from "vitest";
 import { clearVehicleData } from "./pwa";
 
 describe("offline vehicle-data guard", () => {
-  it("removes vehicle history and trajectory queries without touching account or two-factor state", () => {
+  it("removes every vehicle-data query family without touching account or two-factor state", () => {
     const client = new QueryClient();
     client.setQueryData(["vehicles"], { items: [{ name: "SYNTHETIC Atlas" }] });
     client.setQueryData(["trips", { start: "2026-09-01T00:00:00Z" }], { items: [{ id: 1 }] });
     client.setQueryData(["charges", { start: "2026-09-01T00:00:00Z" }], { items: [{ id: 1 }] });
     client.setQueryData(["trajectory", 1], { points: [{ latitude: 52.1 }] });
+    client.setQueryData(["trip", 1], { vehicle_id: 1 });
+    client.setQueryData(["charge", 1], { vehicle_id: 1 });
+    client.setQueryData(["history-capabilities"], { capabilities: { trip_series: { available: true } } });
+    client.setQueryData(["history-window", 1], { start: "2026-01-01T00:00:00Z" });
+    client.setQueryData(["trip-summary", 1], { distance_km: 12.5 });
+    client.setQueryData(["charge-summary", 1], { energy_added_kwh: 22.5 });
+    client.setQueryData(["latest-values", 1], { odometer_km: 100 });
+    client.setQueryData(["trip-series", 1], { series: [] });
+    client.setQueryData(["charge-series", 1], { series: [] });
     client.setQueryData(["settings"], { preferences: { saved: true } });
     client.setQueryData(["me"], { username: "admin" });
     client.setQueryData(["two-factor"], { enabled: true });
@@ -20,6 +29,15 @@ describe("offline vehicle-data guard", () => {
     expect(client.getQueryData(["trips", { start: "2026-09-01T00:00:00Z" }])).toBeUndefined();
     expect(client.getQueryData(["charges", { start: "2026-09-01T00:00:00Z" }])).toBeUndefined();
     expect(client.getQueryData(["trajectory", 1])).toBeUndefined();
+    expect(client.getQueryData(["trip", 1])).toBeUndefined();
+    expect(client.getQueryData(["charge", 1])).toBeUndefined();
+    expect(client.getQueryData(["history-capabilities"])).toBeUndefined();
+    expect(client.getQueryData(["history-window", 1])).toBeUndefined();
+    expect(client.getQueryData(["trip-summary", 1])).toBeUndefined();
+    expect(client.getQueryData(["charge-summary", 1])).toBeUndefined();
+    expect(client.getQueryData(["latest-values", 1])).toBeUndefined();
+    expect(client.getQueryData(["trip-series", 1])).toBeUndefined();
+    expect(client.getQueryData(["charge-series", 1])).toBeUndefined();
     expect(client.getQueryData(["settings"])).toEqual({ preferences: { saved: true } });
     expect(client.getQueryData(["me"])).toEqual({ username: "admin" });
     expect(client.getQueryData(["two-factor"])).toEqual({ enabled: true });

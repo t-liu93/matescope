@@ -11,7 +11,7 @@ import {
   TextInput,
   Title,
 } from "@mantine/core";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Component, lazy, Suspense, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -20,7 +20,7 @@ import { ApiError, historyApi, settingsApi, type HistoryWindow } from "./api/cli
 import type { components } from "./api/schema";
 import { defaultWindow, groupTrajectory, validateWindow } from "./history-utils";
 import i18n from "./i18n";
-import { useOnlineStatus } from "./pwa";
+import { clearVehicleData, useOnlineStatus } from "./pwa";
 
 type Trip = components["schemas"]["Trip"];
 type Charge = components["schemas"]["Charge"];
@@ -88,7 +88,7 @@ function HistoryFilters({
   online: boolean;
 }) {
   const { t } = useTranslation();
-  const vehicles = useQuery({ queryKey: ["vehicles"], queryFn: historyApi.vehicles, enabled: online });
+  const vehicles = useQuery({ queryKey: ["vehicles"], queryFn: ({ signal }) => historyApi.vehicles({ signal }), enabled: online });
   const [message, setMessage] = useState<string | null>(null);
   const options = vehicles.data?.items.map((vehicle) => ({
     value: String(vehicle.id),
@@ -143,22 +143,29 @@ function HistoryList({ kind }: { kind: "trips" | "charges" }) {
   const [draft, setDraft] = useState(defaultWindow);
   const [active, setActive] = useState(draft);
   const [cursors, setCursors] = useState<string[]>([]);
+  const queryClient = useQueryClient();
   const cursor = cursors.at(-1);
   const preferences = useHistorySettings();
   const online = useOnlineStatus();
   const query = useQuery<HistoryPage>({
     queryKey: [kind, active, cursor],
-    queryFn: () => kind === "trips"
-      ? historyApi.trips({ ...active, cursor })
-      : historyApi.charges({ ...active, cursor }),
+    queryFn: ({ signal }) => kind === "trips"
+      ? historyApi.trips({ ...active, cursor }, { signal })
+      : historyApi.charges({ ...active, cursor }, { signal }),
     enabled: online && Boolean(preferences.data?.preferences?.saved),
   });
-  const apply = () => { setCursors([]); setActive(draft); };
+  const replaceActiveWindow = (next: HistoryWindow) => {
+    // Query keys isolate scopes for rendering, but cached data for an obsolete
+    // vehicle/window must not survive or be restored by a late response.
+    clearVehicleData(queryClient);
+    setCursors([]);
+    setActive(next);
+  };
+  const apply = () => replaceActiveWindow(draft);
   const clear = () => {
     const reset = defaultWindow();
-    setCursors([]);
     setDraft(reset);
-    setActive(reset);
+    replaceActiveWindow(reset);
   };
   const page = query.data;
   if (!online) return <OfflineVehicleData />;
@@ -218,10 +225,10 @@ function HistoryDetail({ kind }: { kind: "trips" | "charges" }) {
   const online = useOnlineStatus();
   const detail = useQuery<Trip | Charge>({
     queryKey: [kind, identifier],
-    queryFn: () => kind === "trips" ? historyApi.trip(identifier) : historyApi.charge(identifier),
+    queryFn: ({ signal }) => kind === "trips" ? historyApi.trip(identifier, { signal }) : historyApi.charge(identifier, { signal }),
     enabled: online && Number.isInteger(identifier) && identifier > 0 && Boolean(settings.data?.preferences?.saved),
   });
-  const trajectory = useQuery({ queryKey: ["trajectory", identifier], queryFn: () => historyApi.trajectory(identifier), enabled: online && kind === "trips" && detail.isSuccess && Boolean(settings.data?.preferences?.saved) });
+  const trajectory = useQuery({ queryKey: ["trajectory", identifier], queryFn: ({ signal }) => historyApi.trajectory(identifier, { signal }), enabled: online && kind === "trips" && detail.isSuccess && Boolean(settings.data?.preferences?.saved) });
   const [mapModuleFailed, setMapModuleFailed] = useState(false);
   const [tileFailed, setTileFailed] = useState(false);
   if (!Number.isInteger(identifier) || identifier <= 0) return <Container py="xl"><Alert color="red">{t("historyNotFound")}</Alert></Container>;
@@ -256,7 +263,7 @@ export function VehiclesPage() {
   const online = useOnlineStatus();
   const vehicles = useQuery({
     queryKey: ["vehicles"],
-    queryFn: historyApi.vehicles,
+    queryFn: ({ signal }) => historyApi.vehicles({ signal }),
     enabled: online && Boolean(settings.data?.preferences?.saved),
   });
   if (!online) return <OfflineVehicleData />;

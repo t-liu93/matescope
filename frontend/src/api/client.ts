@@ -5,12 +5,43 @@ import type { components, paths } from "./schema";
 let csrfToken = "";
 
 export class ApiError extends Error {
+  public readonly sourceCode?: SourceErrorCode;
+
   constructor(
     public readonly status: number,
     message: string,
+    sourceCode?: SourceErrorCode,
   ) {
     super(message);
+    this.sourceCode = sourceCode;
   }
+}
+
+export const sourceErrorCodes = [
+  "unconfigured",
+  "disabled",
+  "skipped",
+  "invalid_credentials",
+  "unavailable",
+  "timeout",
+  "incompatible_schema",
+  "unsafe_permissions",
+  "insufficient_permissions",
+] as const;
+
+export type SourceErrorCode = (typeof sourceErrorCodes)[number];
+
+function sourceErrorCode(error: unknown): SourceErrorCode | undefined {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "string" &&
+    (sourceErrorCodes as readonly string[]).includes(error.code)
+  ) {
+    return error.code as SourceErrorCode;
+  }
+  return undefined;
 }
 
 function isWrite(method: string) {
@@ -78,11 +109,13 @@ async function unwrap<T>(result: Promise<ApiResult<T>>): Promise<T> {
       typeof error === "object" && error && "detail" in error
         ? (error as { detail?: unknown }).detail
         : undefined;
+    const code = sourceErrorCode(detail);
     throw new ApiError(
       response.status,
       typeof detail === "string"
         ? detail
         : response.statusText || "Request failed",
+      code,
     );
   }
   return data as T;
@@ -167,8 +200,13 @@ export type HistoryWindow = {
   cursor?: string;
 };
 
-function historyQuery(window: HistoryWindow) {
+export type HistoryRequestOptions = {
+  signal?: AbortSignal;
+};
+
+function historyQuery(window: HistoryWindow, options?: HistoryRequestOptions) {
   return {
+    signal: options?.signal,
     params: {
       query: {
         vehicle_id: window.vehicleId,
@@ -182,20 +220,25 @@ function historyQuery(window: HistoryWindow) {
 }
 
 export const historyApi = {
-  vehicles: () => unwrap(api.GET("/api/v1/vehicles")),
-  trips: (window: HistoryWindow) =>
-    unwrap(api.GET("/api/v1/trips", historyQuery(window))),
-  charges: (window: HistoryWindow) =>
-    unwrap(api.GET("/api/v1/charges", historyQuery(window))),
-  trip: (tripId: number) =>
-    unwrap(api.GET("/api/v1/trips/{trip_id}", { params: { path: { trip_id: tripId } } })),
-  charge: (chargeId: number) =>
+  vehicles: (options?: HistoryRequestOptions) =>
+    unwrap(api.GET("/api/v1/vehicles", { signal: options?.signal })),
+  capabilities: (options?: HistoryRequestOptions) =>
+    unwrap(api.GET("/api/v1/history/capabilities", { signal: options?.signal })),
+  trips: (window: HistoryWindow, options?: HistoryRequestOptions) =>
+    unwrap(api.GET("/api/v1/trips", historyQuery(window, options))),
+  charges: (window: HistoryWindow, options?: HistoryRequestOptions) =>
+    unwrap(api.GET("/api/v1/charges", historyQuery(window, options))),
+  trip: (tripId: number, options?: HistoryRequestOptions) =>
+    unwrap(api.GET("/api/v1/trips/{trip_id}", { signal: options?.signal, params: { path: { trip_id: tripId } } })),
+  charge: (chargeId: number, options?: HistoryRequestOptions) =>
     unwrap(api.GET("/api/v1/charges/{charge_id}", {
+      signal: options?.signal,
       params: { path: { charge_id: chargeId } },
     })),
-  trajectory: (tripId: number) =>
+  trajectory: (tripId: number, options?: HistoryRequestOptions) =>
     unwrap(
       api.GET("/api/v1/trips/{trip_id}/trajectory", {
+        signal: options?.signal,
         params: { path: { trip_id: tripId } },
       }),
     ),

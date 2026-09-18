@@ -94,4 +94,41 @@ describe("typed API client", () => {
     ]);
   });
 
+  it("retains a structured history-source error code", async () => {
+    vi.resetModules();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      response({ detail: { code: "insufficient_permissions" } }, 503),
+    );
+    const { ApiError, historyApi } = await import("./client");
+
+    await expect(historyApi.capabilities()).rejects.toEqual(
+      expect.objectContaining({
+        status: 503,
+        sourceCode: "insufficient_permissions",
+      }),
+    );
+    await historyApi.capabilities().catch((error: unknown) => {
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error).toMatchObject({ message: "Request failed" });
+    });
+  });
+
+  it("passes cancellation through history requests", async () => {
+    vi.resetModules();
+    let requestSignal: AbortSignal | null = null;
+    let receivedAbort = false;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      requestSignal = init?.signal ?? (input instanceof Request ? input.signal : null);
+      requestSignal?.addEventListener("abort", () => { receivedAbort = true; });
+      return response({ items: [] });
+    });
+    const { historyApi } = await import("./client");
+    const controller = new AbortController();
+
+    await historyApi.vehicles({ signal: controller.signal });
+    expect(requestSignal).not.toBeNull();
+    controller.abort();
+    expect(receivedAbort).toBe(true);
+  });
+
 });
