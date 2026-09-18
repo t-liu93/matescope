@@ -1,4 +1,5 @@
 import "@mantine/core/styles.css";
+import "@mantine/dates/styles.css";
 import "./styles.css";
 import "./i18n";
 
@@ -20,6 +21,7 @@ import {
   TextInput,
   Title,
 } from "@mantine/core";
+import { DatesProvider } from "@mantine/dates";
 import {
   QueryClient,
   QueryClientProvider,
@@ -31,6 +33,7 @@ import { createRoot } from "react-dom/client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import * as QRCode from "qrcode";
+import "dayjs/locale/zh-cn";
 import {
   BrowserRouter,
   Link,
@@ -1518,14 +1521,17 @@ function Shell() {
 }
 
 function App({ client = queryClient }: { client?: QueryClient }) {
+  const { i18n: translator } = useTranslation();
   useOfflineVehicleDataGuard(client);
   return (
     <MantineProvider defaultColorScheme="auto">
+      <DatesProvider settings={{ firstDayOfWeek: 1, locale: translator.language.startsWith("zh") ? "zh-cn" : "en" }}>
       <QueryClientProvider client={client}>
         <BrowserRouter>
           <HistoryContextProvider><Shell /></HistoryContextProvider>
         </BrowserRouter>
       </QueryClientProvider>
+      </DatesProvider>
     </MantineProvider>
   );
 }

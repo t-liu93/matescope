@@ -11,12 +11,18 @@ importers:
       '@mantine/core':
         specifier: 8.3.10
         version: 8.3.10(@mantine/hooks@8.3.10(react@19.1.1))(@types/react@19.1.16)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
+      '@mantine/dates':
+        specifier: 8.3.10
+        version: 8.3.10(@mantine/core@8.3.10(@mantine/hooks@8.3.10(react@19.1.1))(@types/react@19.1.16)(react-dom@19.1.1(react@19.1.1))(react@19.1.1))(@mantine/hooks@8.3.10(react@19.1.1))(dayjs@1.11.18)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
       '@mantine/hooks':
         specifier: 8.3.10
         version: 8.3.10(react@19.1.1)
       '@tanstack/react-query':
         specifier: 5.90.5
         version: 5.90.5(react@19.1.1)
+      dayjs:
+        specifier: 1.11.18
+        version: 1.11.18
       i18next:
         specifier: 25.6.0
         version: 25.6.0(typescript@5.9.3)
@@ -525,6 +531,15 @@ packages:
     resolution: {integrity: sha512-aKQFETN14v6GtM07b/G5yJneMM1yrgf9mNrTah6GVy5DvQM0AeutITT7toHqh5gxxwzdg/DoY+HQsv5zhqnc5g==}
     peerDependencies:
       '@mantine/hooks': 8.3.10
+      react: ^18.x || ^19.x
+      react-dom: ^18.x || ^19.x
+
+  '@mantine/dates@8.3.10':
+    resolution: {integrity: sha512-P1uZ+alYGp7fsmkfd+7Fur4AGrqT0X6BWLiVTomzrbyykA+m4TSwPyQjKfsDc7XRqaqx992br/U65T82zy+qGQ==}
+    peerDependencies:
+      '@mantine/core': 8.3.10
+      '@mantine/hooks': 8.3.10
+      dayjs: '>=1.0.0'
       react: ^18.x || ^19.x
       react-dom: ^18.x || ^19.x
 
@@ -1116,6 +1131,9 @@ packages:
   data-urls@6.0.1:
     resolution: {integrity: sha512-euIQENZg6x8mj3fO6o9+fOW8MimUI4PpD/fZBhJfeioZVy9TUpM4UY7KjQNVZFlqwJ0UdzRDzkycB997HEq1BQ==}
     engines: {node: '>=20'}
+
+  dayjs@1.11.18:
+    resolution: {integrity: sha512-zFBQ7WFRvVRhKcWoUh+ZA1g2HVgUbsZm9sbddh8EC5iv93sui8DVVz1Npvz+r6meo9VKfa8NyLWBsQK1VvIKPA==}
 
   debug@4.4.3:
     resolution: {integrity: sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==}
@@ -2684,6 +2702,15 @@ snapshots:
     transitivePeerDependencies:
       - '@types/react'
 
+  '@mantine/dates@8.3.10(@mantine/core@8.3.10(@mantine/hooks@8.3.10(react@19.1.1))(@types/react@19.1.16)(react-dom@19.1.1(react@19.1.1))(react@19.1.1))(@mantine/hooks@8.3.10(react@19.1.1))(dayjs@1.11.18)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)':
+    dependencies:
+      '@mantine/core': 8.3.10(@mantine/hooks@8.3.10(react@19.1.1))(@types/react@19.1.16)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
+      '@mantine/hooks': 8.3.10(react@19.1.1)
+      clsx: 2.1.1
+      dayjs: 1.11.18
+      react: 19.1.1
+      react-dom: 19.1.1(react@19.1.1)
+
   '@mantine/hooks@8.3.10(react@19.1.1)':
     dependencies:
       react: 19.1.1
@@ -3173,6 +3200,8 @@ snapshots:
     dependencies:
       whatwg-mimetype: 5.0.0
       whatwg-url: 15.1.0
+
+  dayjs@1.11.18: {}
 
   debug@4.4.3(supports-color@10.2.2):
     dependencies:

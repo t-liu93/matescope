@@ -8,17 +8,19 @@ import {
   SimpleGrid,
   Stack,
   Text,
-  TextInput,
   Title,
 } from "@mantine/core";
+import { DatePickerInput } from "@mantine/dates";
+import { useMediaQuery } from "@mantine/hooks";
 import { useQuery } from "@tanstack/react-query";
-import { Component, lazy, Suspense, useEffect, useState } from "react";
+import { Component, lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { ApiError, historyApi, settingsApi, type HistoryWindow } from "./api/client";
 import type { components } from "./api/schema";
-import { defaultWindow, groupTrajectory, validateWindow } from "./history-utils";
+import { addCalendarDays, defaultWindow, groupTrajectory, localDateIso, windowToCalendarRange, type CalendarRange } from "./history-utils";
+import type { HistoryWindowPreset } from "./api/client";
 import i18n from "./i18n";
 import { useOnlineStatus } from "./pwa";
 import { HistorySelectionGuard, useHistoryContext } from "./history-context";
@@ -79,27 +81,54 @@ function OfflineVehicleData() {
 
 function HistoryFilters({
   window,
-  setWindow,
-  apply,
   clear,
-  online,
+  timezone,
 }: {
   window: HistoryWindow;
-  setWindow: (window: HistoryWindow) => void;
-  apply: () => void;
   clear: () => void;
-  online: boolean;
+  timezone: string;
 }) {
   const { t } = useTranslation();
-  const { vehicle, vehicles, setVehicleId } = useHistoryContext();
+  const { vehicle, vehicles, preset, setVehicleId, setPreset, cancelPreset } = useHistoryContext();
   const options = vehicles.map((available) => ({
     value: String(available.id), label: available.name || available.model || `${t("vehicle")} ${available.id}`,
   }));
   const [message, setMessage] = useState<string | null>(null);
-  const submit = () => {
-    const problem = validateWindow(window);
-    setMessage(problem);
-    if (!problem) apply();
+  const submission = useRef(0);
+  const [presetDraft, setPresetDraft] = useState<HistoryWindowPreset>(preset);
+  const [range, setRange] = useState<CalendarRange>(() => windowToCalendarRange(window, timezone));
+  const mobile = useMediaQuery("(max-width: 767px)");
+  useEffect(() => { setPresetDraft(preset); setRange(windowToCalendarRange(window, timezone)); }, [preset, window, timezone]);
+  const choosePreset = (preset: typeof presetDraft) => {
+    setMessage(null);
+    setPresetDraft(preset);
+    if (preset === "all_history") return;
+    const today = localDateIso(new Date(), timezone);
+    let start = today;
+    if (preset === "last_7_days") start = addCalendarDays(today, -6);
+    if (preset === "last_30_days") start = addCalendarDays(today, -29);
+    if (preset === "this_month") start = `${today.slice(0, 8)}01`;
+    if (preset === "this_year") start = `${today.slice(0, 4)}-01-01`;
+    setRange([start, today]);
+  };
+  const submit = async () => {
+    const submissionToken = ++submission.current;
+    if (presetDraft === "all_history") {
+      setMessage(null);
+      try {
+        await setPreset(presetDraft);
+      } catch {
+        if (submission.current === submissionToken) setMessage("historyLoadFailed");
+      }
+      return;
+    }
+    if (!range[0] || !range[1]) { setMessage("historyIncompleteWindow"); return; }
+    setMessage(null);
+    try {
+      await setPreset(presetDraft, presetDraft === "custom" ? [range[0], range[1]] : undefined);
+    } catch {
+      if (submission.current === submissionToken) setMessage("historyLoadFailed");
+    }
   };
   return (
     <Card withBorder radius="md">
@@ -112,23 +141,17 @@ function HistoryFilters({
             data={options}
             onChange={(id) => id && setVehicleId(Number(id))}
           />
-          <TextInput
-            label={t("fromUtc")}
-            value={window.start}
-            onChange={(event) => setWindow({ ...window, start: event.currentTarget.value })}
-          />
-          <TextInput
-            label={t("toUtc")}
-            value={window.end}
-            onChange={(event) => setWindow({ ...window, end: event.currentTarget.value })}
-          />
+          <DatePickerInput type="range" label={t("dateRange")} value={range} onChange={(value) => { setPresetDraft("custom"); setRange(value); }} dropdownType={mobile ? "modal" : "popover"} firstDayOfWeek={1} maxDate={localDateIso(new Date(), timezone)} valueFormat="YYYY-MM-DD" ariaLabels={{ previousYear: t("previousYear"), nextYear: t("nextYear"), previousMonth: t("previousMonth"), nextMonth: t("nextMonth"), previousDecade: t("previousDecade"), nextDecade: t("nextDecade"), yearLevelControl: t("changeYear"), monthLevelControl: t("changeMonth") }} />
         </SimpleGrid>
-        <Text size="sm" c="dimmed">{t("utcWindowHelp")}</Text>
+        <Group gap="xs" wrap="wrap">
+          {(["today", "last_7_days", "last_30_days", "this_month", "this_year", "all_history", "custom"] as const).map((preset) => <Button key={preset} size="compact-sm" variant={presetDraft === preset ? "filled" : "light"} onClick={() => choosePreset(preset)}>{t(`preset_${preset}`)}</Button>)}
+        </Group>
+        <Text size="sm" c="dimmed">{t("calendarWindowHelp", { timezone })}</Text>
         {message && <Alert color="red">{t(message)}</Alert>}
         <Group>
-          <Button onClick={submit}>{t("apply")}</Button>
-          <Button variant="subtle" onClick={() => { setMessage(null); clear(); }}>
-            {t("clear")}
+          <Button onClick={() => void submit()}>{t("apply")}</Button>
+          <Button variant="subtle" onClick={() => { submission.current += 1; cancelPreset(); setMessage(null); setPresetDraft(preset); setRange(windowToCalendarRange(window, timezone)); clear(); }}>
+            {t("cancel")}
           </Button>
         </Group>
       </Stack>
@@ -138,25 +161,24 @@ function HistoryFilters({
 
 function HistoryList({ kind }: { kind: "trips" | "charges" }) {
   const { t } = useTranslation();
-  const { vehicle, window: scopedWindow, setWindow: setScopedWindow, historyPath } = useHistoryContext();
+  const { vehicle, window: scopedWindow, emptyWindow, historyPath } = useHistoryContext();
   const [draft, setDraft] = useState(defaultWindow);
   const [cursors, setCursors] = useState<string[]>([]);
-  const cursor = cursors.at(-1);
+  const scope = `${vehicle?.id ?? ""}:${scopedWindow?.start ?? ""}:${scopedWindow?.end ?? ""}`;
+  const [cursorScope, setCursorScope] = useState(scope);
+  const activeCursors = cursorScope === scope ? cursors : [];
+  const cursor = activeCursors.at(-1);
   const preferences = useHistorySettings();
   const online = useOnlineStatus();
   useEffect(() => { if (scopedWindow) setDraft(scopedWindow); }, [scopedWindow]);
+  useEffect(() => { setCursors([]); setCursorScope(scope); }, [scope]);
   const query = useQuery<HistoryPage>({
     queryKey: [kind, scopedWindow, cursor],
     queryFn: ({ signal }) => kind === "trips"
       ? historyApi.trips({ ...scopedWindow!, vehicleId: vehicle!.id, cursor }, { signal })
       : historyApi.charges({ ...scopedWindow!, vehicleId: vehicle!.id, cursor }, { signal }),
-    enabled: online && Boolean(preferences.data?.preferences?.saved) && Boolean(vehicle && scopedWindow),
+    enabled: online && !emptyWindow && Boolean(preferences.data?.preferences?.saved) && Boolean(vehicle && scopedWindow),
   });
-  const replaceActiveWindow = (next: HistoryWindow) => {
-    setCursors([]);
-    setScopedWindow(next);
-  };
-  const apply = () => replaceActiveWindow(draft);
   const clear = () => {
     if (scopedWindow) setDraft(scopedWindow);
   };
@@ -171,10 +193,10 @@ function HistoryList({ kind }: { kind: "trips" | "charges" }) {
       <Stack gap="lg">
         <Title order={1}>{t(kind)}</Title>
         <Text size="sm" c="dimmed">{t("timesShownIn", { timezone })}</Text>
-        <HistoryFilters window={draft} setWindow={setDraft} apply={apply} clear={clear} online={online} />
+        <HistoryFilters window={draft} clear={clear} timezone={timezone} />
         {query.isPending && <Text>{t("loading")}</Text>}
         {query.error && <HistoryFailure retry={() => void query.refetch()} />}
-        {page?.items.length === 0 && <Alert>{t("noHistory")}</Alert>}
+        {(emptyWindow || page?.items.length === 0) && <Alert>{t("noHistory")}</Alert>}
         {page?.items.map((item) => (
           <Card key={item.id} withBorder radius="md">
             <Stack gap="xs">
@@ -192,8 +214,8 @@ function HistoryList({ kind }: { kind: "trips" | "charges" }) {
           </Card>
         ))}
         <Group>
-          {cursors.length > 0 && <Button variant="light" onClick={() => setCursors((value) => value.slice(0, -1))}>{t("previousPage")}</Button>}
-          {page?.next_cursor && <Button variant="light" onClick={() => setCursors((value) => [...value, page.next_cursor!])}>{t("nextPage")}</Button>}
+          {activeCursors.length > 0 && <Button variant="light" onClick={() => { setCursorScope(scope); setCursors((value) => [...value].slice(0, -1)); }}>{t("previousPage")}</Button>}
+          {page?.next_cursor && <Button variant="light" onClick={() => { setCursorScope(scope); setCursors((value) => [...value, page.next_cursor!]); }}>{t("nextPage")}</Button>}
         </Group>
       </Stack>
     </Container>

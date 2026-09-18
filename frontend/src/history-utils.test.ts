@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultWindow, groupTrajectory, validateWindow } from "./history-utils";
+import { defaultWindow, groupTrajectory, validateWindow, windowToCalendarRange } from "./history-utils";
 
 describe("history window", () => {
   it("keeps UTC boundaries stable across a DST change", () => {
@@ -17,7 +17,12 @@ describe("history window", () => {
     expect(validateWindow({ start: "2026-01-01T00:00:00", end: "2026-01-02T00:00:00Z" })).toBe("historyInvalidUtc");
     expect(validateWindow({ start: "2026-01-01T00:00:00+01:00", end: "2026-01-02T00:00:00Z" })).toBe("historyInvalidUtc");
     expect(validateWindow({ start: "2026-02-30T00:00:00Z", end: "2026-03-02T00:00:00Z" })).toBe("historyInvalidUtc");
-    expect(validateWindow({ start: "2026-01-01T00:00:00Z", end: "2026-04-02T00:00:00Z" })).toBe("historyWindowTooLarge");
+    expect(validateWindow({ start: "2026-01-01T00:00:00Z", end: "2026-04-02T00:00:00Z" })).toBeNull();
+  });
+
+  it("renders an API-resolved DST window as the saved local day", () => {
+    expect(windowToCalendarRange({ start: "2026-03-28T23:00:00Z", end: "2026-03-29T18:00:00Z" }, "Europe/Amsterdam"))
+      .toEqual(["2026-03-29", "2026-03-29"]);
   });
 });
 

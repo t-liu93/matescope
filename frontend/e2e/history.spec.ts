@@ -115,6 +115,8 @@ type MockOptions = {
   language?: "en" | "zh";
   settingsRequests?: { count: number };
   vehicleRequests?: { count: number };
+  historyWindowRequests?: { requests: URL[] };
+  deferredHistoryWindow?: { preset: string; vehicleId?: number; started: { count: number }; release: Promise<void> };
 };
 async function mockHistoryApi(page: Page, options: MockOptions = {}) {
   const lists: URL[] = [];
@@ -143,7 +145,15 @@ async function mockHistoryApi(page: Page, options: MockOptions = {}) {
       return route.fulfill({ json: { items: options.zeroCars ? [] : [{ id: 1, name: "SYNTHETIC Atlas", model: "Model 3" }, { id: 2, name: "SYNTHETIC Boreal", model: null }] } });
     }
     if (/\/vehicles\/\d+\/history-window$/.test(path)) {
-      return route.fulfill({ json: { preset: "last_30_days", timezone: "Europe/Amsterdam", start: "2026-08-14T00:00:00Z", end: "2026-09-13T00:00:00Z", is_empty: false } });
+      if (options.historyWindowRequests) options.historyWindowRequests.requests.push(request);
+      const preset = request.searchParams.get("preset") ?? "last_30_days";
+      if (options.deferredHistoryWindow?.preset === preset
+        && (options.deferredHistoryWindow.vehicleId === undefined || Number(path.split("/").at(-2)) === options.deferredHistoryWindow.vehicleId)) {
+        options.deferredHistoryWindow.started.count += 1;
+        await options.deferredHistoryWindow.release;
+      }
+      const custom = preset === "custom";
+      return route.fulfill({ json: { preset, timezone: "Europe/Amsterdam", start: custom ? "2026-01-01T00:00:00Z" : preset === "all_history" ? null : "2026-08-14T00:00:00Z", end: "2026-09-13T00:00:00Z", is_empty: options.empty ?? false } });
     }
     if (path.endsWith("/trips") || path.endsWith("/charges")) {
       lists.push(request);
@@ -165,29 +175,30 @@ async function mockHistoryApi(page: Page, options: MockOptions = {}) {
   return lists;
 }
 
-test.describe("T06 history and map", () => {
-  test("uses strict UTC filters, stable cursor pages, missing values, details, and DST display", async ({ page }) => {
+test.describe("T09 calendar history filters", () => {
+  test("uses presets, stable cursor pages, missing values, details, and DST display", async ({ page }) => {
     const lists = await mockHistoryApi(page);
     await localTiles(page);
     await page.goto("/trips");
     await page.getByRole("textbox", { name: "Vehicle", exact: true }).click();
     await page.getByRole("option", { name: "SYNTHETIC Atlas", exact: true }).click();
-    await page.getByLabel("From (UTC ISO 8601)", { exact: true }).fill("2026-09-01T00:00:00Z");
-    await page.getByLabel("To (UTC ISO 8601)", { exact: true }).fill("2026-09-14T00:00:00Z");
+    await page.getByRole("button", { name: "Last 7 days", exact: true }).click();
     await page.getByRole("button", { name: "Apply", exact: true }).click();
     await expect.poll(() => lists.at(-1)?.searchParams.get("vehicle_id")).toBe("1");
-    await expect.poll(() => lists.at(-1)?.searchParams.get("start")).toBe("2026-09-01T00:00:00Z");
+    await expect.poll(() => lists.at(-1)?.searchParams.get("start")).toBe("2026-08-14T00:00:00Z");
     await expect(page.getByText("Unfinished", { exact: true })).toBeVisible();
     await expect(page.getByText("—", { exact: true }).first()).toBeVisible();
     await expect(page.getByText("Mar 29, 2026, 1:30 AM", { exact: true })).toBeVisible();
     await expect(page.getByText("Mar 29, 2026, 1:30 AM – Mar 29, 2026, 3:30 AM", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Next page", exact: true }).click();
     await expect.poll(() => lists.at(-1)?.searchParams.get("cursor")).toBe("cursor-1");
-    await expect.poll(() => lists.at(-1)?.searchParams.get("start")).toBe("2026-09-01T00:00:00Z");
+    await expect.poll(() => lists.at(-1)?.searchParams.get("start")).toBe("2026-08-14T00:00:00Z");
     await expect.poll(() => lists.at(-1)?.searchParams.get("vehicle_id")).toBe("1");
     await page.getByRole("button", { name: "Previous page", exact: true }).click();
     await expect.poll(() => lists.at(-1)?.searchParams.get("cursor")).toBeNull();
-    await page.getByRole("button", { name: "Clear", exact: true }).click();
+    await page.getByRole("button", { name: "This year", exact: true }).click();
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(page).toHaveURL(/preset=last_7_days/);
     await expect.poll(() => lists.at(-1)?.searchParams.get("vehicle_id")).toBe("1");
     await expect.poll(() => lists.at(-1)?.searchParams.get("cursor")).toBeNull();
     await page.locator('a[href^="/trips/1"]').click();
@@ -200,14 +211,85 @@ test.describe("T06 history and map", () => {
     await expect(page.getByText(/22\.5 kWh/)).toBeVisible();
   });
 
-  test("reports invalid input and retains the summary when trajectory fails", async ({ page }) => {
+  test("resets pagination when a new range or vehicle is applied", async ({ page }) => {
+    const lists = await mockHistoryApi(page);
+    await localTiles(page);
+    await page.goto("/trips");
+    await expect.poll(() => lists.at(-1)?.searchParams.get("vehicle_id")).toBe("1");
+    await page.getByRole("button", { name: "Next page", exact: true }).click();
+    await expect.poll(() => lists.at(-1)?.searchParams.get("cursor")).toBe("cursor-1");
+    await page.getByRole("button", { name: "This year", exact: true }).click();
+    await page.getByRole("button", { name: "Apply", exact: true }).click();
+    await expect.poll(() => lists.at(-1)?.searchParams.get("cursor")).toBeNull();
+    await page.getByRole("button", { name: "Next page", exact: true }).click();
+    await expect.poll(() => lists.at(-1)?.searchParams.get("cursor")).toBe("cursor-1");
+    await page.getByRole("textbox", { name: "Vehicle", exact: true }).click();
+    await page.getByRole("option", { name: "SYNTHETIC Boreal", exact: true }).click();
+    await expect.poll(() => lists.at(-1)?.searchParams.get("vehicle_id")).toBe("2");
+    await expect.poll(() => lists.at(-1)?.searchParams.get("cursor")).toBeNull();
+  });
+
+  test("does not apply a delayed range after Cancel", async ({ page }) => {
+    let release!: () => void;
+    const started = { count: 0 };
+    await mockHistoryApi(page, {
+      deferredHistoryWindow: { preset: "all_history", started, release: new Promise<void>((resolve) => { release = resolve; }) },
+    });
+    await localTiles(page);
+    await page.goto("/trips");
+    await expect(page).toHaveURL(/start=.*end=/);
+    const before = page.url();
+    await page.getByRole("button", { name: "All history", exact: true }).click();
+    await page.getByRole("button", { name: "Apply", exact: true }).click();
+    await expect.poll(() => started.count).toBe(1);
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    release();
+    await expect(page).toHaveURL(before);
+  });
+
+  test("does not apply a delayed range after switching vehicles", async ({ page }) => {
+    let release!: () => void;
+    const started = { count: 0 };
+    await mockHistoryApi(page, {
+      deferredHistoryWindow: { preset: "all_history", vehicleId: 2, started, release: new Promise<void>((resolve) => { release = resolve; }) },
+    });
+    await localTiles(page);
+    await page.goto("/trips");
+    await page.getByRole("textbox", { name: "Vehicle", exact: true }).click();
+    await page.getByRole("option", { name: "SYNTHETIC Boreal", exact: true }).click();
+    await expect(page).toHaveURL(/vehicle=2/);
+    await page.getByRole("button", { name: "All history", exact: true }).click();
+    await page.getByRole("button", { name: "Apply", exact: true }).click();
+    await expect.poll(() => started.count).toBe(1);
+    await page.getByRole("textbox", { name: "Vehicle", exact: true }).click();
+    await page.getByRole("option", { name: "SYNTHETIC Atlas", exact: true }).click();
+    await expect(page).toHaveURL(/vehicle=1/);
+    release();
+    await expect(page).toHaveURL(/vehicle=1/);
+    await expect(page).not.toHaveURL(/preset=all_history/);
+  });
+
+  test("uses custom calendar dates only after Apply and retains the summary when trajectory fails", async ({ page }) => {
     await mockHistoryApi(page, { trajectoryFailure: true });
     await localTiles(page);
     await page.goto("/trips");
     await expect(page).toHaveURL(/start=.*end=/);
-    await page.getByLabel("From (UTC ISO 8601)", { exact: true }).fill("2026-09-01");
+    const picker = page.getByLabel("Date range", { exact: true });
+    await picker.click();
+    if (test.info().project.name === "mobile") await expect(page.getByRole("dialog")).toBeVisible();
+    else await expect(page.locator('[data-dates-dropdown="true"]')).toBeVisible();
+    const previousMonth = page.locator("button.mantine-DatePickerInput-calendarHeaderControl").first();
+    await expect(previousMonth).toHaveAttribute("data-direction", "previous");
+    await previousMonth.click();
+    await page.getByRole("button", { name: "Change to month view" }).click();
+    await page.getByRole("button", { name: "Change to year view" }).click();
+    await page.getByRole("button", { name: "Previous decade" }).click();
+    await page.getByRole("button", { name: "2019", exact: true }).click();
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Custom", exact: true }).click();
+    await expect(page).toHaveURL(/start=.*end=/);
     await page.getByRole("button", { name: "Apply", exact: true }).click();
-    await expect(page.getByText("Enter UTC ISO 8601 dates, for example 2026-01-30T00:00:00Z.")).toBeVisible();
+    await expect(page).toHaveURL(/start=2026-01-01T00%3A00%3A00Z/);
     await page.locator('a[href^="/trips/1"]').click();
     await expect(page.getByText(/12\.5 km/)).toBeVisible();
     await expect(page.getByText("The route map could not be loaded. The trip summary is still available.")).toBeVisible();
@@ -226,6 +308,18 @@ test.describe("T06 history and map", () => {
     await expect(page.getByText("The route map could not be loaded. The trip summary is still available.")).toBeVisible();
     await expect.poll(() => attempts.count).toBeGreaterThan(0);
     expect(errors).toEqual([]);
+  });
+
+  test("does not list-query an empty all-history window", async ({ page }) => {
+    const lists = await mockHistoryApi(page, { empty: true });
+    await localTiles(page);
+    await page.goto("/trips");
+    await expect(page.getByText("No records match this window.", { exact: true })).toBeVisible();
+    const before = lists.length;
+    await page.getByRole("button", { name: "All history", exact: true }).click();
+    await page.getByRole("button", { name: "Apply", exact: true }).click();
+    await expect(page.getByText("No records match this window.", { exact: true })).toBeVisible();
+    expect(lists).toHaveLength(before);
   });
 
   test("shows empty history and gates it when settings cannot load", async ({ page }) => {
