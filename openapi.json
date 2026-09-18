@@ -2252,6 +2252,40 @@
             "maxLength": 2048,
             "title": "Tile Url",
             "default": "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+          },
+          "range_basis": {
+            "type": "string",
+            "enum": [
+              "rated",
+              "ideal"
+            ],
+            "title": "Range Basis"
+          },
+          "display_currency": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "AUD",
+                  "CAD",
+                  "CHF",
+                  "CNY",
+                  "DKK",
+                  "EUR",
+                  "GBP",
+                  "JPY",
+                  "NOK",
+                  "NZD",
+                  "PLN",
+                  "SEK",
+                  "USD"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Currency"
           }
         },
         "additionalProperties": false,
@@ -2281,6 +2315,41 @@
             "maxLength": 2048,
             "title": "Tile Url",
             "default": "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+          },
+          "range_basis": {
+            "type": "string",
+            "enum": [
+              "rated",
+              "ideal"
+            ],
+            "title": "Range Basis",
+            "default": "rated"
+          },
+          "display_currency": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "AUD",
+                  "CAD",
+                  "CHF",
+                  "CNY",
+                  "DKK",
+                  "EUR",
+                  "GBP",
+                  "JPY",
+                  "NOK",
+                  "NZD",
+                  "PLN",
+                  "SEK",
+                  "USD"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Currency"
           },
           "saved": {
             "type": "boolean",

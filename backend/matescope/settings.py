@@ -3,7 +3,7 @@
 import json
 import re
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Literal, cast
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -23,10 +23,37 @@ class InputModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+Currency = Literal[
+    "AUD",
+    "CAD",
+    "CHF",
+    "CNY",
+    "DKK",
+    "EUR",
+    "GBP",
+    "JPY",
+    "NOK",
+    "NZD",
+    "PLN",
+    "SEK",
+    "USD",
+]
+
+
 class Preferences(InputModel):
     language: Literal["en", "zh"] = "en"
     timezone: str = Field(default="UTC", min_length=1, max_length=100)
     tile_url: str = Field(default="https://tile.openstreetmap.org/{z}/{x}/{y}.png", max_length=2048)
+    # Keep this request field optional in the generated client contract so legacy
+    # clients can omit it; the response model still exposes the resolved value.
+    range_basis: Literal["rated", "ideal"] = cast(Literal["rated", "ideal"], None)
+    display_currency: Currency | None = None
+
+    @model_validator(mode="after")
+    def valid_range_basis(self) -> "Preferences":
+        if "range_basis" in self.model_fields_set and self.range_basis is None:
+            raise ValueError("range_basis cannot be null")
+        return self
 
     @field_validator("timezone")
     @classmethod
@@ -55,6 +82,7 @@ class Preferences(InputModel):
 
 
 class PreferencesResponse(Preferences):
+    range_basis: Literal["rated", "ideal"] = "rated"
     saved: bool = False
 
 
@@ -289,7 +317,13 @@ def save_preferences(body: Preferences, request: Request) -> SettingsResponse:
     with storage(request).transaction() as session:
         record = record_for_write(request, session)
         result = SettingsResponse.model_validate_json(record.configuration)
-        result.preferences = PreferencesResponse(**body.model_dump(), saved=True)
+        fields = body.model_dump()
+        # New preferences must survive legacy clients that omit them.  `model_fields_set`
+        # still distinguishes an explicit null, so clearing a configured currency works.
+        for field in ("range_basis", "display_currency"):
+            if field not in body.model_fields_set:
+                fields[field] = getattr(result.preferences, field)
+        result.preferences = PreferencesResponse(**fields, saved=True)
         record.configuration = result.model_dump_json()
         return result
 

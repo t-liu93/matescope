@@ -1100,6 +1100,13 @@ export interface components {
              * @default https://tile.openstreetmap.org/{z}/{x}/{y}.png
              */
             tile_url: string;
+            /**
+             * Range Basis
+             * @enum {string}
+             */
+            range_basis?: "rated" | "ideal";
+            /** Display Currency */
+            display_currency?: ("AUD" | "CAD" | "CHF" | "CNY" | "DKK" | "EUR" | "GBP" | "JPY" | "NOK" | "NZD" | "PLN" | "SEK" | "USD") | null;
         };
         /** PreferencesResponse */
         PreferencesResponse: {
@@ -1119,6 +1126,14 @@ export interface components {
              * @default https://tile.openstreetmap.org/{z}/{x}/{y}.png
              */
             tile_url: string;
+            /**
+             * Range Basis
+             * @default rated
+             * @enum {string}
+             */
+            range_basis: "rated" | "ideal";
+            /** Display Currency */
+            display_currency?: ("AUD" | "CAD" | "CHF" | "CNY" | "DKK" | "EUR" | "GBP" | "JPY" | "NOK" | "NZD" | "PLN" | "SEK" | "USD") | null;
             /**
              * Saved
              * @default false

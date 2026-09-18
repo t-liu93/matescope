@@ -137,6 +137,91 @@ def test_progress_and_settings_survive_logout_restart(tmp_path: Path) -> None:
         assert edited["onboarding"]["completed"] is True
 
 
+def test_preferences_range_basis_and_currency_are_backward_compatible(client: TestClient) -> None:
+    create_admin(client)
+
+    # Old JSON has no M1 fields and must read with the new defaults.
+    with Session(client.app.state.storage.engine) as session:
+        session.add(
+            ApplicationSettings(
+                id=1,
+                configuration=json.dumps(
+                    {
+                        "preferences": {
+                            "language": "en",
+                            "timezone": "UTC",
+                            "tile_url": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+                            "saved": True,
+                        }
+                    }
+                ),
+                encrypted_passwords="{}",
+            )
+        )
+        session.commit()
+    current = client.get("/api/v1/settings").json()["preferences"]
+    assert current["range_basis"] == "rated"
+    assert current["display_currency"] is None
+
+    configured = save(
+        client,
+        "preferences",
+        {"range_basis": "ideal", "display_currency": "EUR"},
+    )["preferences"]
+    assert configured["range_basis"] == "ideal"
+    assert configured["display_currency"] == "EUR"
+
+    # A legacy client sends only the original fields; M1 values remain intact.
+    legacy = save(
+        client,
+        "preferences",
+        {"language": "zh", "timezone": "Europe/Amsterdam", "tile_url": "https://tiles.example/{z}/{x}/{y}.png"},
+    )["preferences"]
+    assert legacy["language"] == "zh"
+    assert legacy["range_basis"] == "ideal"
+    assert legacy["display_currency"] == "EUR"
+
+    cleared = save(client, "preferences", {"display_currency": None})["preferences"]
+    assert cleared["display_currency"] is None
+
+
+def test_preferences_reject_unknown_range_basis_and_currency(client: TestClient) -> None:
+    create_admin(client)
+    invalid_bodies = (
+        {"range_basis": "battery"},
+        {"range_basis": None},
+        {"display_currency": "eur"},
+        {"display_currency": "US"},
+    )
+    for body in invalid_bodies:
+        response = client.put(
+            "/api/v1/settings/preferences",
+            headers=csrf_headers(client),
+            json=body,
+        )
+        assert response.status_code == 422
+        assert response.json() == {"detail": "Invalid request fields"}
+
+
+def test_preferences_openapi_range_basis_contract(client: TestClient) -> None:
+    schemas = client.app.openapi()["components"]["schemas"]
+    request = schemas["Preferences"]["properties"]["range_basis"]
+    response = schemas["PreferencesResponse"]["properties"]["range_basis"]
+
+    assert "range_basis" not in schemas["Preferences"].get("required", [])
+    assert request == {
+        "type": "string",
+        "enum": ["rated", "ideal"],
+        "title": "Range Basis",
+    }
+    assert response == {
+        "type": "string",
+        "enum": ["rated", "ideal"],
+        "title": "Range Basis",
+        "default": "rated",
+    }
+
+
 def test_onboarding_accepts_optional_two_factor_step_and_keeps_completion(
     client: TestClient,
 ) -> None:
