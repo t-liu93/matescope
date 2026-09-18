@@ -204,6 +204,8 @@ export type HistoryRequestOptions = {
   signal?: AbortSignal;
 };
 
+export type HistoryWindowPreset = "today" | "last_7_days" | "last_30_days" | "this_month" | "this_year" | "all_history" | "custom";
+
 function historyQuery(window: HistoryWindow, options?: HistoryRequestOptions) {
   return {
     signal: options?.signal,
@@ -222,6 +224,11 @@ function historyQuery(window: HistoryWindow, options?: HistoryRequestOptions) {
 export const historyApi = {
   vehicles: (options?: HistoryRequestOptions) =>
     unwrap(api.GET("/api/v1/vehicles", { signal: options?.signal })),
+  historyWindow: (vehicleId: number, preset: HistoryWindowPreset = "last_30_days", options?: HistoryRequestOptions) =>
+    unwrap(api.GET("/api/v1/vehicles/{vehicle_id}/history-window", {
+      signal: options?.signal,
+      params: { path: { vehicle_id: vehicleId }, query: { preset } },
+    })),
   capabilities: (options?: HistoryRequestOptions) =>
     unwrap(api.GET("/api/v1/history/capabilities", { signal: options?.signal })),
   trips: (window: HistoryWindow, options?: HistoryRequestOptions) =>

@@ -52,6 +52,7 @@ import {
 import type { components } from "./api/schema";
 import i18n from "./i18n";
 import { PwaStatus, registerPwa, useOfflineVehicleDataGuard } from "./pwa";
+import { HistoryContextProvider, useHistoryContext } from "./history-context";
 
 type Settings = components["schemas"]["SettingsResponse"];
 type Step = components["schemas"]["Onboarding"]["step"];
@@ -1448,6 +1449,7 @@ function Shell() {
   const location = useLocation();
   const showHeader = !location.pathname.startsWith("/login");
   const { t } = useTranslation();
+  const { historyPath } = useHistoryContext();
   return (
     <AppShell header={showHeader ? { height: 60 } : undefined}>
       {showHeader && (
@@ -1461,9 +1463,9 @@ function Shell() {
                     <Button variant="subtle" aria-label={t("navigation")}>{t("menu")}</Button>
                   </Menu.Target>
                   <Menu.Dropdown>
-                    <Menu.Item component={Link} to="/vehicles">{t("vehicles")}</Menu.Item>
-                    <Menu.Item component={Link} to="/trips">{t("trips")}</Menu.Item>
-                    <Menu.Item component={Link} to="/charges">{t("charges")}</Menu.Item>
+                    <Menu.Item component={Link} to={historyPath("/vehicles")}>{t("vehicles")}</Menu.Item>
+                    <Menu.Item component={Link} to={historyPath("/trips")}>{t("trips")}</Menu.Item>
+                    <Menu.Item component={Link} to={historyPath("/charges")}>{t("charges")}</Menu.Item>
                   </Menu.Dropdown>
                 </Menu>
                 <Button component={Link} to="/settings" variant="subtle">
@@ -1521,7 +1523,7 @@ function App({ client = queryClient }: { client?: QueryClient }) {
     <MantineProvider defaultColorScheme="auto">
       <QueryClientProvider client={client}>
         <BrowserRouter>
-          <Shell />
+          <HistoryContextProvider><Shell /></HistoryContextProvider>
         </BrowserRouter>
       </QueryClientProvider>
     </MantineProvider>

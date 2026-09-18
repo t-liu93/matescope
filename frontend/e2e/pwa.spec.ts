@@ -39,6 +39,9 @@ async function mockVehicleHistory(context: BrowserContext, delayTrip = false) {
       preferences: { language: "en", timezone: "UTC", tile_url: "https://tiles.example/{z}/{x}/{y}.png", saved: true },
       onboarding: { step: "review", completed: true },
     } });
+    if (/\/vehicles\/\d+\/history-window$/.test(path)) return route.fulfill({ json: {
+      preset: "last_30_days", timezone: "UTC", start: "2026-08-18T00:00:00Z", end: "2026-09-17T00:00:00Z", is_empty: false,
+    } });
     if (path.endsWith("/vehicles")) return route.fulfill({ json: {
       items: [{ id: 1, name: "SYNTHETIC Atlas", model: "Model 3" }],
     } });

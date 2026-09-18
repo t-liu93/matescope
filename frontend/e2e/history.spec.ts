@@ -18,7 +18,10 @@ async function localTiles(page: Page, fail = false, attempts?: { count: number }
       await route.fulfill(fail
         ? { status: 503, contentType: "text/plain", body: "synthetic tile failure" }
         : { status: 200, contentType: "image/png", body: tilePng });
-    } else if (url.origin !== baseUrl.origin) await route.abort();
+    } else if (![
+      baseUrl.origin,
+      "http://127.0.0.1:49233",
+    ].includes(url.origin)) await route.abort();
     // Preserve the API fixtures registered before this network guard.
     else await route.fallback();
   });
@@ -105,6 +108,7 @@ async function finishOnboarding(page: Page) {
 
 type MockOptions = {
   empty?: boolean;
+  zeroCars?: boolean;
   settingsFailure?: boolean;
   settingsFailuresRemaining?: { count: number };
   trajectoryFailure?: boolean;
@@ -136,7 +140,10 @@ async function mockHistoryApi(page: Page, options: MockOptions = {}) {
     }
     if (path.endsWith("/vehicles")) {
       if (options.vehicleRequests) options.vehicleRequests.count += 1;
-      return route.fulfill({ json: { items: [{ id: 1, name: "SYNTHETIC Atlas", model: "Model 3" }, { id: 2, name: "SYNTHETIC Boreal", model: null }] } });
+      return route.fulfill({ json: { items: options.zeroCars ? [] : [{ id: 1, name: "SYNTHETIC Atlas", model: "Model 3" }, { id: 2, name: "SYNTHETIC Boreal", model: null }] } });
+    }
+    if (/\/vehicles\/\d+\/history-window$/.test(path)) {
+      return route.fulfill({ json: { preset: "last_30_days", timezone: "Europe/Amsterdam", start: "2026-08-14T00:00:00Z", end: "2026-09-13T00:00:00Z", is_empty: false } });
     }
     if (path.endsWith("/trips") || path.endsWith("/charges")) {
       lists.push(request);
@@ -147,6 +154,7 @@ async function mockHistoryApi(page: Page, options: MockOptions = {}) {
       return route.fulfill({ json: { items, next_cursor: trips && !options.empty && !request.searchParams.get("cursor") ? "cursor-1" : null, start: request.searchParams.get("start"), end: request.searchParams.get("end") } });
     }
     if (/\/trips\/1$/.test(path)) return route.fulfill({ json: { id: 1, vehicle_id: 1, start: "2026-03-29T00:30:00Z", end: "2026-03-29T01:30:00Z", duration_min: 60, distance_km: 12.5, speed_max_kmh: 72 } });
+    if (/\/trips\/2$/.test(path)) return route.fulfill({ json: { id: 2, vehicle_id: 2, start: "2026-03-30T00:30:00Z", end: "2026-03-30T01:30:00Z", duration_min: 60, distance_km: 22, speed_max_kmh: 72 } });
     if (/\/charges\/1$/.test(path)) return route.fulfill({ json: { id: 1, vehicle_id: 1, start: "2026-09-12T20:00:00Z", end: "2026-09-12T20:45:00Z", duration_min: 45, energy_added_kwh: 22.5 } });
     if (path.endsWith("/trajectory")) {
       if (options.trajectoryFailure) return route.fulfill({ status: 503, json: { detail: "unavailable" } });
@@ -180,15 +188,15 @@ test.describe("T06 history and map", () => {
     await page.getByRole("button", { name: "Previous page", exact: true }).click();
     await expect.poll(() => lists.at(-1)?.searchParams.get("cursor")).toBeNull();
     await page.getByRole("button", { name: "Clear", exact: true }).click();
-    await expect.poll(() => lists.at(-1)?.searchParams.get("vehicle_id")).toBeNull();
+    await expect.poll(() => lists.at(-1)?.searchParams.get("vehicle_id")).toBe("1");
     await expect.poll(() => lists.at(-1)?.searchParams.get("cursor")).toBeNull();
-    await page.locator('a[href="/trips/1"]').click();
+    await page.locator('a[href^="/trips/1"]').click();
     await expect(page.getByText(/12\.5 km/)).toBeVisible();
     await expect(page.getByLabel("Trip route map")).toBeVisible();
     await expect(page.locator("path.leaflet-interactive")).toHaveCount(2);
     await expect(page.getByText("Showing a simplified route from 4950 recorded positions.")).toBeVisible();
     await page.goto("/charges");
-    await page.locator('a[href="/charges/1"]').click();
+    await page.locator('a[href^="/charges/1"]').click();
     await expect(page.getByText(/22\.5 kWh/)).toBeVisible();
   });
 
@@ -196,10 +204,11 @@ test.describe("T06 history and map", () => {
     await mockHistoryApi(page, { trajectoryFailure: true });
     await localTiles(page);
     await page.goto("/trips");
+    await expect(page).toHaveURL(/start=.*end=/);
     await page.getByLabel("From (UTC ISO 8601)", { exact: true }).fill("2026-09-01");
     await page.getByRole("button", { name: "Apply", exact: true }).click();
     await expect(page.getByText("Enter UTC ISO 8601 dates, for example 2026-01-30T00:00:00Z.")).toBeVisible();
-    await page.locator('a[href="/trips/1"]').click();
+    await page.locator('a[href^="/trips/1"]').click();
     await expect(page.getByText(/12\.5 km/)).toBeVisible();
     await expect(page.getByText("The route map could not be loaded. The trip summary is still available.")).toBeVisible();
   });
@@ -273,6 +282,47 @@ test.describe("T06 history and map", () => {
       await expect(page.getByRole("menuitem", { name, exact: true })).toBeVisible();
   });
 
+  test("keeps a fixed scoped window across navigation and establishes the detail owner", async ({ page }) => {
+    const lists = await mockHistoryApi(page);
+    await localTiles(page);
+    await page.goto("/trips?vehicle=2&start=2026-01-01T00%3A00%3A00Z&end=2026-02-01T00%3A00%3A00Z");
+    await expect.poll(() => lists.at(-1)?.searchParams.get("vehicle_id")).toBe("2");
+    await page.getByRole("button", { name: "History navigation", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Charges", exact: true }).click();
+    await expect(page).toHaveURL(/vehicle=2.*start=2026-01-01T00/);
+    await page.goto("/trips/1");
+    await expect(page.getByText(/12\.5 km/)).toBeVisible();
+    await expect(page).toHaveURL(/vehicle=1/);
+  });
+
+  test("returns to the triggering list when a direct detail resolves to another vehicle", async ({ page }) => {
+    await mockHistoryApi(page);
+    await localTiles(page);
+    const listUrl = "/trips?vehicle=1&start=2026-01-01T00%3A00%3A00Z&end=2026-02-01T00%3A00%3A00Z";
+    await page.goto(listUrl);
+    await expect(page.getByText("12.5 km", { exact: true })).toBeVisible();
+    await page.goto("/trips/2");
+    await expect(page.getByText(/22 km/)).toBeVisible();
+    await expect(page).toHaveURL(/\/trips\/2\?vehicle=2.*start=2026-08-14T00/);
+    await page.goBack();
+    await expect(page).toHaveURL(/\/trips\?vehicle=1.*start=2026-01-01T00/);
+    await expect(page.getByText("12.5 km", { exact: true })).toBeVisible();
+    await page.goForward();
+    await expect(page).toHaveURL(/\/trips\/2\?vehicle=2.*start=2026-08-14T00/);
+    await expect(page.getByText(/22 km/)).toBeVisible();
+  });
+
+  test("shows explicit invalid and empty vehicle states without substituting a car", async ({ page }) => {
+    await mockHistoryApi(page);
+    await localTiles(page);
+    await page.goto("/trips?vehicle=99");
+    await expect(page.getByText("This vehicle is not available. Choose an available vehicle to continue.")).toBeVisible();
+    await mockHistoryApi(page, { zeroCars: true });
+    await page.goto("/trips");
+    await expect(page.getByText("No vehicles are available.", { exact: true })).toBeVisible();
+    await expect(page.getByRole("main").getByRole("link", { name: "Settings", exact: true })).toBeVisible();
+  });
+
   test("real synthetic PostgreSQL flow covers vehicles, records, map, and logout", async ({ page }) => {
     test.skip(!realSql, "Set MATESCOPE_E2E_REAL_PG=1 with a loopback isolated synthetic instance");
     test.setTimeout(150_000);
@@ -283,13 +333,13 @@ test.describe("T06 history and map", () => {
     await page.goto("/vehicles");
     await expect(page.getByText("SYNTHETIC Atlas", { exact: true })).toBeVisible();
     await page.goto("/trips");
-    await page.locator('a[href="/trips/1"]').click();
+    await page.locator('a[href^="/trips/1"]').click();
     await expect(page.getByText(/12\.5 km/)).toBeVisible();
     await expect(page.getByLabel("Trip route map")).toBeVisible();
     await expect(page.locator("path.leaflet-interactive")).toHaveCount(2);
     await expect(page.getByText("Showing a simplified route from 4950 recorded positions.")).toBeVisible();
     await page.goto("/charges");
-    await page.locator('a[href="/charges/1"]').click();
+    await page.locator('a[href^="/charges/1"]').click();
     await expect(page.getByText(/22\.5 kWh/)).toBeVisible();
     await page.goto("/settings");
     await page.getByRole("button", { name: "Sign out", exact: true }).click();

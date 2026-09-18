@@ -11,8 +11,8 @@ import {
   TextInput,
   Title,
 } from "@mantine/core";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Component, lazy, Suspense, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Component, lazy, Suspense, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
@@ -20,7 +20,8 @@ import { ApiError, historyApi, settingsApi, type HistoryWindow } from "./api/cli
 import type { components } from "./api/schema";
 import { defaultWindow, groupTrajectory, validateWindow } from "./history-utils";
 import i18n from "./i18n";
-import { clearVehicleData, useOnlineStatus } from "./pwa";
+import { useOnlineStatus } from "./pwa";
+import { HistorySelectionGuard, useHistoryContext } from "./history-context";
 
 type Trip = components["schemas"]["Trip"];
 type Charge = components["schemas"]["Charge"];
@@ -31,6 +32,8 @@ const TrajectoryMap = lazy(() => import("./trajectory-map"));
 function useHistorySettings() {
   return useQuery({
     queryKey: ["settings"],
+    staleTime: Infinity,
+    retryOnMount: false,
     queryFn: async () => {
       const settings = await settingsApi.get();
       if (settings.preferences?.saved) await i18n.changeLanguage(settings.preferences.language);
@@ -88,12 +91,11 @@ function HistoryFilters({
   online: boolean;
 }) {
   const { t } = useTranslation();
-  const vehicles = useQuery({ queryKey: ["vehicles"], queryFn: ({ signal }) => historyApi.vehicles({ signal }), enabled: online });
+  const { vehicle, vehicles, setVehicleId } = useHistoryContext();
+  const options = vehicles.map((available) => ({
+    value: String(available.id), label: available.name || available.model || `${t("vehicle")} ${available.id}`,
+  }));
   const [message, setMessage] = useState<string | null>(null);
-  const options = vehicles.data?.items.map((vehicle) => ({
-    value: String(vehicle.id),
-    label: vehicle.name || vehicle.model || `${t("vehicle")} ${vehicle.id}`,
-  })) ?? [];
   const submit = () => {
     const problem = validateWindow(window);
     setMessage(problem);
@@ -103,16 +105,12 @@ function HistoryFilters({
     <Card withBorder radius="md">
       <Stack gap="sm">
         <Text fw={600}>{t("filters")}</Text>
-        {vehicles.error && <HistoryFailure retry={() => void vehicles.refetch()} />}
         <SimpleGrid cols={{ base: 1, sm: 3 }}>
           <Select
             label={t("vehicle")}
-            placeholder={t("allVehicles")}
-            clearable
+            value={vehicle ? String(vehicle.id) : null}
             data={options}
-            value={window.vehicleId === undefined ? null : String(window.vehicleId)}
-            onChange={(id) => setWindow({ ...window, vehicleId: id ? Number(id) : undefined })}
-            disabled={vehicles.isPending}
+            onChange={(id) => id && setVehicleId(Number(id))}
           />
           <TextInput
             label={t("fromUtc")}
@@ -140,32 +138,27 @@ function HistoryFilters({
 
 function HistoryList({ kind }: { kind: "trips" | "charges" }) {
   const { t } = useTranslation();
+  const { vehicle, window: scopedWindow, setWindow: setScopedWindow, historyPath } = useHistoryContext();
   const [draft, setDraft] = useState(defaultWindow);
-  const [active, setActive] = useState(draft);
   const [cursors, setCursors] = useState<string[]>([]);
-  const queryClient = useQueryClient();
   const cursor = cursors.at(-1);
   const preferences = useHistorySettings();
   const online = useOnlineStatus();
+  useEffect(() => { if (scopedWindow) setDraft(scopedWindow); }, [scopedWindow]);
   const query = useQuery<HistoryPage>({
-    queryKey: [kind, active, cursor],
+    queryKey: [kind, scopedWindow, cursor],
     queryFn: ({ signal }) => kind === "trips"
-      ? historyApi.trips({ ...active, cursor }, { signal })
-      : historyApi.charges({ ...active, cursor }, { signal }),
-    enabled: online && Boolean(preferences.data?.preferences?.saved),
+      ? historyApi.trips({ ...scopedWindow!, vehicleId: vehicle!.id, cursor }, { signal })
+      : historyApi.charges({ ...scopedWindow!, vehicleId: vehicle!.id, cursor }, { signal }),
+    enabled: online && Boolean(preferences.data?.preferences?.saved) && Boolean(vehicle && scopedWindow),
   });
   const replaceActiveWindow = (next: HistoryWindow) => {
-    // Query keys isolate scopes for rendering, but cached data for an obsolete
-    // vehicle/window must not survive or be restored by a late response.
-    clearVehicleData(queryClient);
     setCursors([]);
-    setActive(next);
+    setScopedWindow(next);
   };
   const apply = () => replaceActiveWindow(draft);
   const clear = () => {
-    const reset = defaultWindow();
-    setDraft(reset);
-    replaceActiveWindow(reset);
+    if (scopedWindow) setDraft(scopedWindow);
   };
   const page = query.data;
   if (!online) return <OfflineVehicleData />;
@@ -194,7 +187,7 @@ function HistoryList({ kind }: { kind: "trips" | "charges" }) {
                 <Text>{value(item.duration_min, "min")}</Text>
                 {kind === "trips" ? <><Text>{value((item as Trip).distance_km, "km")}</Text><Text>{value((item as Trip).speed_max_kmh, "km/h")}</Text></> : <Text>{value((item as Charge).energy_added_kwh, "kWh")}</Text>}
               </Group>
-              <Button component={Link} variant="light" to={`/${kind}/${item.id}`}>{t("viewDetails")}</Button>
+              <Button component={Link} variant="light" to={historyPath(`/${kind}/${item.id}`)}>{t("viewDetails")}</Button>
             </Stack>
           </Card>
         ))}
@@ -223,14 +216,21 @@ function HistoryDetail({ kind }: { kind: "trips" | "charges" }) {
   const identifier = Number(params.id);
   const settings = useHistorySettings();
   const online = useOnlineStatus();
+  const { setVehicleId, historyPath } = useHistoryContext();
   const detail = useQuery<Trip | Charge>({
     queryKey: [kind, identifier],
     queryFn: ({ signal }) => kind === "trips" ? historyApi.trip(identifier, { signal }) : historyApi.charge(identifier, { signal }),
     enabled: online && Number.isInteger(identifier) && identifier > 0 && Boolean(settings.data?.preferences?.saved),
+    staleTime: Infinity,
   });
   const trajectory = useQuery({ queryKey: ["trajectory", identifier], queryFn: ({ signal }) => historyApi.trajectory(identifier, { signal }), enabled: online && kind === "trips" && detail.isSuccess && Boolean(settings.data?.preferences?.saved) });
   const [mapModuleFailed, setMapModuleFailed] = useState(false);
   const [tileFailed, setTileFailed] = useState(false);
+  useEffect(() => {
+    // The owner is discovered after entering a direct detail URL. Replacing
+    // that URL preserves the list entry that led here for browser Back.
+    if (detail.data?.vehicle_id !== undefined) setVehicleId(detail.data.vehicle_id, { replace: true });
+  }, [detail.data?.vehicle_id, setVehicleId]);
   if (!Number.isInteger(identifier) || identifier <= 0) return <Container py="xl"><Alert color="red">{t("historyNotFound")}</Alert></Container>;
   if (!online) return <OfflineVehicleData />;
   if (settings.isPending) return <Container py="xl"><Text>{t("loading")}</Text></Container>;
@@ -243,7 +243,7 @@ function HistoryDetail({ kind }: { kind: "trips" | "charges" }) {
   const item = detail.data;
   const timezone = settings.data.preferences.timezone;
   return <Container size="md" py="xl"><Stack gap="lg">
-    <Button component={Link} variant="subtle" to={`/${kind}`}>{kind === "trips" ? t("backToTrips") : t("backToCharges")}</Button>
+    <Button component={Link} variant="subtle" to={historyPath(`/${kind}`)}>{kind === "trips" ? t("backToTrips") : t("backToCharges")}</Button>
     <Title order={1}>{kind === "trips" ? t("trip") : t("charge")}</Title>
     <Text size="sm" c="dimmed">{t("timesShownIn", { timezone })}</Text>
     <Card withBorder radius="md"><DetailValues item={item} kind={kind} timezone={timezone} /></Card>
@@ -278,8 +278,8 @@ export function VehiclesPage() {
   </Stack></Container>;
 }
 
-export const TripsPage = () => <HistoryList kind="trips" />;
-export const ChargesPage = () => <HistoryList kind="charges" />;
+export const TripsPage = () => <HistorySelectionGuard><HistoryList kind="trips" /></HistorySelectionGuard>;
+export const ChargesPage = () => <HistorySelectionGuard><HistoryList kind="charges" /></HistorySelectionGuard>;
 export const TripDetailPage = () => {
   const { id } = useParams();
   return <HistoryDetail key={id} kind="trips" />;
