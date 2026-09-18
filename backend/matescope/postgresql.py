@@ -4,7 +4,7 @@ import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from threading import RLock
-from typing import Any
+from typing import Any, Literal
 
 import psycopg
 from fastapi import Request
@@ -29,6 +29,83 @@ COLUMNS = {
     ),
     "positions": ("id", "drive_id", "date", "latitude", "longitude"),
 }
+
+# These groups are deliberately expressed in terms of the data each later M1
+# endpoint needs.  The base M0 contract above remains mandatory; these are
+# additive and may be unavailable to a legacy minimal reader.
+CAPABILITY_COLUMNS: dict[str, dict[str, tuple[str, ...]]] = {
+    "trip_details": {
+        "cars": ("efficiency",),
+        "drives": (
+            "start_position_id",
+            "end_position_id",
+            "start_address_id",
+            "end_address_id",
+            "start_geofence_id",
+            "end_geofence_id",
+            "start_rated_range_km",
+            "end_rated_range_km",
+            "start_ideal_range_km",
+            "end_ideal_range_km",
+        ),
+    },
+    "charge_details": {
+        "charging_processes": (
+            "address_id",
+            "geofence_id",
+            "start_battery_level",
+            "end_battery_level",
+            "charge_energy_used",
+            "cost",
+        ),
+    },
+    "locations": {
+        "addresses": ("id", "name", "road", "house_number", "city"),
+        "geofences": ("id", "name"),
+    },
+    "latest_values": {
+        "positions": (
+            "car_id",
+            "odometer",
+            "battery_level",
+            "rated_battery_range_km",
+            "ideal_battery_range_km",
+        ),
+        "charges": (
+            "id",
+            "charging_process_id",
+            "date",
+            "battery_level",
+            "rated_battery_range_km",
+            "ideal_battery_range_km",
+        ),
+    },
+    "trip_series": {
+        "positions": (
+            "battery_level",
+            "speed",
+            "power",
+            "inside_temp",
+            "outside_temp",
+            "elevation",
+        ),
+    },
+    "charge_series": {
+        "charges": (
+            "id",
+            "charging_process_id",
+            "date",
+            "charger_power",
+            "battery_level",
+            "outside_temp",
+        ),
+    },
+}
+
+TEXT_TYPES = {"text", "varchar"}
+INTEGER_TYPES = {"int2", "int4", "int8"}
+NUMBER_TYPES = INTEGER_TYPES | {"numeric", "float4", "float8"}
+TIME_TYPES = {"timestamp", "timestamptz"}
 
 
 class SourceFailure(Exception):
@@ -122,6 +199,81 @@ def validate_connection(connection: psycopg.Connection[dict[str, Any]]) -> None:
     schema = connection.execute("SELECT has_schema_privilege('public','USAGE') AS ok").fetchone()
     if schema is None or not schema["ok"]:
         raise SourceFailure("insufficient_permissions")
+
+
+def expected_types(column: str) -> set[str]:
+    if column in {"date", "start_date", "end_date"}:
+        return TIME_TYPES
+    if column in {"name", "model", "road", "house_number", "city"}:
+        return TEXT_TYPES
+    if column in {
+        "id",
+        "car_id",
+        "drive_id",
+        "charging_process_id",
+        "start_position_id",
+        "end_position_id",
+        "start_address_id",
+        "end_address_id",
+        "start_geofence_id",
+        "end_geofence_id",
+        "address_id",
+        "geofence_id",
+    }:
+        return INTEGER_TYPES
+    return NUMBER_TYPES
+
+
+CapabilityReason = Literal["insufficient_permissions", "incompatible_schema"]
+
+
+def capability_status(
+    connection: psycopg.Connection[dict[str, Any]],
+) -> dict[str, CapabilityReason | None]:
+    """Return added capability availability without reading any added data."""
+    relations = connection.execute(
+        "SELECT c.oid, c.relname, c.relkind FROM pg_catalog.pg_class c "
+        "JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace "
+        "WHERE n.nspname='public' AND c.relname = ANY(%s)",
+        (list({table for group in CAPABILITY_COLUMNS.values() for table in group}),),
+    ).fetchall()
+    by_table = {row["relname"]: row for row in relations}
+    columns: dict[str, dict[str, dict[str, Any]]] = {}
+    for table, relation_row in by_table.items():
+        if relation_row["relkind"] not in {"r", "p"}:
+            continue
+        rows = connection.execute(
+            "SELECT a.attname, t.typname, "
+            "has_column_privilege(a.attrelid, a.attname, 'SELECT') AS readable "
+            "FROM pg_catalog.pg_attribute a "
+            "JOIN pg_catalog.pg_type t ON t.oid=a.atttypid "
+            "WHERE a.attrelid=%s AND a.attnum>0 AND NOT a.attisdropped",
+            (relation_row["oid"],),
+        ).fetchall()
+        columns[table] = {row["attname"]: row for row in rows}
+
+    status: dict[str, CapabilityReason | None] = {}
+    for group, tables in CAPABILITY_COLUMNS.items():
+        reason: CapabilityReason | None = None
+        for table, required in tables.items():
+            relation = by_table.get(table)
+            if relation is None or relation["relkind"] not in {"r", "p"}:
+                reason = "incompatible_schema"
+                break
+            for name in required:
+                column = columns[table].get(name)
+                if column is None or column["typname"] not in expected_types(name):
+                    reason = "incompatible_schema"
+                    break
+                if not column["readable"]:
+                    # Keep checking this group: an incompatible schema is a
+                    # more actionable diagnosis than a simultaneous missing
+                    # grant and must not be hidden by column order.
+                    reason = reason or "insufficient_permissions"
+            if reason == "incompatible_schema":
+                break
+        status[group] = reason
+    return status
 
 
 class DataSource:

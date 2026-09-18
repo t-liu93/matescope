@@ -151,7 +151,15 @@ def test_postgresql_test_auth_csrf_and_unconfigured(client: TestClient) -> None:
     endpoint = "/api/v1/settings/postgresql/test"
     assert client.post(endpoint, headers=csrf_headers(client)).status_code == 401
     assert client.get("/api/v1/diagnostics").status_code == 401
-    for path in ("vehicles", "trips", "trips/1", "trips/1/trajectory", "charges", "charges/1"):
+    for path in (
+        "vehicles",
+        "trips",
+        "trips/1",
+        "trips/1/trajectory",
+        "charges",
+        "charges/1",
+        "history/capabilities",
+    ):
         assert client.get(f"/api/v1/{path}").status_code == 401
     create_admin(client)
     headers = csrf_headers(client)

@@ -13,7 +13,7 @@ from psycopg import sql
 from pydantic import BaseModel, field_validator
 
 from .auth import require_admin, storage
-from .postgresql import classify, snapshot
+from .postgresql import CapabilityReason, capability_status, classify, snapshot
 from .settings import MQTTResponse, PostgreSQLResponse, SMTPResponse, read_settings
 
 router = APIRouter(prefix="/api/v1", tags=["history"], dependencies=[Depends(require_admin)])
@@ -91,6 +91,15 @@ class Diagnostics(BaseModel):
     smtp: SMTPResponse
 
 
+class Capability(BaseModel):
+    available: bool
+    reason: CapabilityReason | None = None
+
+
+class HistoryCapabilities(BaseModel):
+    capabilities: dict[str, Capability]
+
+
 @contextmanager
 def connection(request: Request) -> Iterator[psycopg.Connection[dict[str, Any]]]:
     try:
@@ -110,6 +119,18 @@ def diagnostics(request: Request) -> Diagnostics:
     with Session(storage(request).engine) as session:
         current = read_settings(session)
         return Diagnostics(postgresql=current.postgresql, mqtt=current.mqtt, smtp=current.smtp)
+
+
+@router.get("/history/capabilities", response_model=HistoryCapabilities)
+def history_capabilities(request: Request) -> HistoryCapabilities:
+    with connection(request) as database:
+        statuses = capability_status(database)
+    return HistoryCapabilities(
+        capabilities={
+            name: Capability(available=reason is None, reason=reason)
+            for name, reason in statuses.items()
+        }
+    )
 
 
 @router.get("/vehicles", response_model=Vehicles)

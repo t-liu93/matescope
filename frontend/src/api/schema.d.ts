@@ -412,6 +412,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/history/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** History Capabilities */
+        get: operations["history_capabilities_api_v1_history_capabilities_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/vehicles": {
         parameters: {
             query?: never;
@@ -563,6 +580,13 @@ export interface components {
              * @enum {string}
              */
             status: "authenticated";
+        };
+        /** Capability */
+        Capability: {
+            /** Available */
+            available: boolean;
+            /** Reason */
+            reason?: ("insufficient_permissions" | "incompatible_schema") | null;
         };
         /** ChallengeResponse */
         ChallengeResponse: {
@@ -717,6 +741,13 @@ export interface components {
             service: string;
             /** Version */
             version: string;
+        };
+        /** HistoryCapabilities */
+        HistoryCapabilities: {
+            /** Capabilities */
+            capabilities: {
+                [key: string]: components["schemas"]["Capability"];
+            };
         };
         /** LoginInput */
         LoginInput: {
@@ -2016,6 +2047,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Diagnostics"];
+                };
+            };
+        };
+    };
+    history_capabilities_api_v1_history_capabilities_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HistoryCapabilities"];
                 };
             };
         };

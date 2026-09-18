@@ -777,6 +777,27 @@
         }
       }
     },
+    "/api/v1/history/capabilities": {
+      "get": {
+        "tags": [
+          "history"
+        ],
+        "summary": "History Capabilities",
+        "operationId": "history_capabilities_api_v1_history_capabilities_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryCapabilities"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/vehicles": {
       "get": {
         "tags": [
@@ -1219,6 +1240,34 @@
         ],
         "title": "AuthResponse"
       },
+      "Capability": {
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "insufficient_permissions",
+                  "incompatible_schema"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "available"
+        ],
+        "title": "Capability"
+      },
       "ChallengeResponse": {
         "properties": {
           "csrf_token": {
@@ -1584,6 +1633,22 @@
           "version"
         ],
         "title": "HealthResponse"
+      },
+      "HistoryCapabilities": {
+        "properties": {
+          "capabilities": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Capability"
+            },
+            "type": "object",
+            "title": "Capabilities"
+          }
+        },
+        "type": "object",
+        "required": [
+          "capabilities"
+        ],
+        "title": "HistoryCapabilities"
       },
       "LoginInput": {
         "properties": {

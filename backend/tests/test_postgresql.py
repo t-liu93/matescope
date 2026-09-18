@@ -13,7 +13,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 from matescope.main import create_app
-from matescope.postgresql import DataSource, SourceFailure, classify
+from matescope.postgresql import CAPABILITY_COLUMNS, DataSource, SourceFailure, classify
 from matescope.settings import PostgreSQLResponse
 from psycopg.conninfo import conninfo_to_dict
 from test_auth import configuration, create_admin, csrf_headers
@@ -89,6 +89,25 @@ def mutation(admin: psycopg.Connection[Any], change: str, undo: str) -> Iterator
         yield
     finally:
         admin.execute(undo)
+
+
+@contextmanager
+def optional_grants(admin: psycopg.Connection[Any]) -> Iterator[None]:
+    columns: dict[str, set[str]] = {}
+    for group in CAPABILITY_COLUMNS.values():
+        for table, required in group.items():
+            columns.setdefault(table, set()).update(required)
+    statements = [
+        f"SELECT ({','.join(sorted(required))}) ON public.{table}"
+        for table, required in columns.items()
+    ]
+    try:
+        for statement in statements:
+            admin.execute(f"GRANT {statement} TO matescope_readonly")
+        yield
+    finally:
+        for statement in statements:
+            admin.execute(f"REVOKE {statement} FROM matescope_readonly")
 
 
 def test_synthetic_sql_and_readonly(client: TestClient, pgconfig: PostgreSQLResponse) -> None:
@@ -169,6 +188,76 @@ def test_m1_synthetic_history_shape_and_legacy_minimum(
     assert not admin.execute(
         "SELECT has_column_privilege('matescope_readonly', 'public.charges', 'id', 'SELECT')"
     ).fetchone()[0]
+
+
+def test_history_capabilities_keep_legacy_history_available(
+    client: TestClient, admin: psycopg.Connection[Any]
+) -> None:
+    response = client.get("/api/v1/history/capabilities")
+    assert response.status_code == 200, response.text
+    capabilities = response.json()["capabilities"]
+    assert capabilities["trip_details"] == {
+        "available": False,
+        "reason": "insufficient_permissions",
+    }
+    assert capabilities["locations"] == {
+        "available": False,
+        "reason": "insufficient_permissions",
+    }
+    assert client.get("/api/v1/vehicles").status_code == 200
+    assert client.get("/api/v1/trips").status_code == 200
+
+
+def test_history_capabilities_validate_all_added_columns(
+    client: TestClient, admin: psycopg.Connection[Any]
+) -> None:
+    with optional_grants(admin):
+        response = client.get("/api/v1/history/capabilities")
+        assert response.status_code == 200, response.text
+        assert all(
+            capability == {"available": True, "reason": None}
+            for capability in response.json()["capabilities"].values()
+        )
+
+
+def test_history_capabilities_report_schema_and_permission_separately(
+    client: TestClient, admin: psycopg.Connection[Any]
+) -> None:
+    with mutation(
+        admin,
+        "GRANT SELECT (efficiency) ON public.cars TO matescope_readonly",
+        "REVOKE SELECT (efficiency) ON public.cars FROM matescope_readonly",
+    ):
+        result = client.get("/api/v1/history/capabilities").json()["capabilities"]
+        assert result["trip_details"] == {
+            "available": False,
+            "reason": "insufficient_permissions",
+        }
+    with mutation(
+        admin,
+        "ALTER TABLE public.charges ALTER COLUMN charger_power TYPE text "
+        "USING charger_power::text",
+        "ALTER TABLE public.charges ALTER COLUMN charger_power TYPE numeric "
+        "USING charger_power::numeric",
+    ):
+        result = client.get("/api/v1/history/capabilities").json()["capabilities"]
+        assert result["charge_series"] == {
+            "available": False,
+            "reason": "incompatible_schema",
+        }
+
+
+def test_history_capabilities_reject_unsafe_role(
+    client: TestClient, admin: psycopg.Connection[Any]
+) -> None:
+    with mutation(
+        admin,
+        "GRANT SELECT ON public.tokens TO matescope_readonly",
+        "REVOKE SELECT ON public.tokens FROM matescope_readonly",
+    ):
+        response = client.get("/api/v1/history/capabilities")
+        assert response.status_code == 503
+        assert response.json() == {"detail": {"code": "unsafe_permissions"}}
 
 
 def test_window_pagination_timezone_missing_and_old(client: TestClient) -> None:
