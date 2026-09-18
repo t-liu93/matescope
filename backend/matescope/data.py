@@ -319,7 +319,7 @@ class Window:
             if any(value.tzinfo is None for value in (self.start, self.end)):
                 raise ValueError
             self.start, self.end = self.start.astimezone(UTC), self.end.astimezone(UTC)
-            if not timedelta(0) < self.end - self.start <= timedelta(days=90):
+            if not timedelta(0) < self.end - self.start:
                 raise ValueError
             if self.after and (
                 self.after[0].tzinfo is None

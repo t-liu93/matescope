@@ -305,12 +305,80 @@ def test_window_pagination_timezone_missing_and_old(client: TestClient) -> None:
     assert client.get("/api/v1/trips/999999/trajectory").status_code == 404
 
 
+def test_complete_history_pagination_binds_cursor_to_kind_vehicle_and_window(
+    client: TestClient, admin: psycopg.Connection[Any]
+) -> None:
+    """A resolved multi-year window remains complete across small cursor pages."""
+    admin.execute("INSERT INTO public.cars (id, name, model) VALUES (99, 'PAGING', NULL)")
+    admin.execute(
+        "INSERT INTO public.drives "
+        "(id, car_id, start_date, end_date, distance, duration_min, speed_max) VALUES "
+        "(9701, 99, TIMESTAMP '2020-01-02 00:00:00', TIMESTAMP '2020-01-02 00:10:00', 1, 10, 10), "
+        "(9702, 99, TIMESTAMP '2022-06-15 12:00:00', TIMESTAMP '2022-06-15 12:10:00', 2, 10, 20), "
+        "(9703, 99, TIMESTAMP '2022-06-15 12:00:00', TIMESTAMP '2022-06-15 12:10:00', 3, 10, 30), "
+        "(9704, 99, TIMESTAMP '2025-12-31 23:00:00', TIMESTAMP '2025-12-31 23:10:00', 4, 10, 40)"
+    )
+    admin.execute(
+        "INSERT INTO public.charging_processes "
+        "(id, car_id, start_date, end_date, charge_energy_added, duration_min) VALUES "
+        "(9801, 99, TIMESTAMP '2020-01-02 00:00:00', TIMESTAMP '2020-01-02 00:10:00', 1, 10), "
+        "(9802, 99, TIMESTAMP '2022-06-15 12:00:00', TIMESTAMP '2022-06-15 12:10:00', 2, 10), "
+        "(9803, 99, TIMESTAMP '2022-06-15 12:00:00', TIMESTAMP '2022-06-15 12:10:00', 3, 10), "
+        "(9804, 99, TIMESTAMP '2025-12-31 23:00:00', TIMESTAMP '2025-12-31 23:10:00', 4, 10)"
+    )
+    try:
+        window = {
+            "vehicle_id": 99,
+            "start": "2020-01-01T00:00:00Z",
+            "end": "2026-01-01T00:00:00Z",
+            "limit": 2,
+        }
+        pages = (
+            ("trips", [9704, 9703, 9702, 9701]),
+            ("charges", [9804, 9803, 9802, 9801]),
+        )
+        for path, expected in pages:
+            first = client.get(f"/api/v1/{path}", params=window)
+            assert first.status_code == 200, first.text
+            page = first.json()
+            ids = [item["id"] for item in page["items"]]
+            assert page["next_cursor"]
+
+            cursor = page["next_cursor"]
+            while cursor:
+                response = client.get(
+                    f"/api/v1/{path}",
+                    params={"vehicle_id": 99, "limit": 2, "cursor": cursor},
+                )
+                assert response.status_code == 200, response.text
+                page = response.json()
+                ids.extend(item["id"] for item in page["items"])
+                cursor = page["next_cursor"]
+            assert ids == expected
+            assert len(ids) == len(set(ids))
+
+        trip_cursor = client.get("/api/v1/trips", params=window).json()["next_cursor"]
+        assert trip_cursor
+        assert client.get(
+            "/api/v1/trips", params={"cursor": trip_cursor, "vehicle_id": 1}
+        ).status_code == 422
+        assert client.get(
+            "/api/v1/trips", params={"cursor": trip_cursor, "start": "2021-01-01T00:00:00Z"}
+        ).status_code == 422
+        assert client.get(
+            "/api/v1/charges", params={"cursor": trip_cursor, "vehicle_id": 99}
+        ).status_code == 422
+    finally:
+        admin.execute("DELETE FROM public.drives WHERE car_id=99")
+        admin.execute("DELETE FROM public.charging_processes WHERE car_id=99")
+        admin.execute("DELETE FROM public.cars WHERE id=99")
+
+
 @pytest.mark.parametrize(
     "params",
     [
         {"start": "2026-01-01"},
         {"start": "2026-01-01T00:00:00"},
-        {"start": "2026-01-01T00:00:00Z", "end": "2026-05-01T00:00:00Z"},
         {"start": "2026-01-01T00:00:00Z", "end": "2026-01-01T00:00:00Z"},
         {"limit": 101},
         {"limit": 0},
