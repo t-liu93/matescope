@@ -5,6 +5,7 @@ import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -110,6 +111,64 @@ def test_synthetic_sql_and_readonly(client: TestClient, pgconfig: PostgreSQLResp
                 connection.execute("UPDATE public.drives SET distance=1 WHERE id=1")
     finally:
         source.close()
+
+
+def test_m1_synthetic_history_shape_and_legacy_minimum(
+    admin: psycopg.Connection[Any],
+) -> None:
+    """The M1 fixture has optional joins while the M0 role remains minimal."""
+    rows = admin.execute(
+        "SELECT d.id, d.car_id, a.name, a.road, g.name, d.start_rated_range_km, "
+        "d.end_rated_range_km, c.efficiency "
+        "FROM public.drives AS d "
+        "LEFT JOIN public.addresses AS a ON a.id = d.start_address_id "
+        "LEFT JOIN public.geofences AS g ON g.id = d.start_geofence_id "
+        "JOIN public.cars AS c ON c.id = d.car_id "
+        "WHERE d.id IN (1, 6, 7) ORDER BY d.id"
+    ).fetchall()
+    assert rows == [
+        (
+            1,
+            1,
+            "Synthetic home",
+            "Example Road",
+            "Synthetic home",
+            300,
+            288,
+            Decimal("0.1800"),
+        ),
+        (6, 2, None, None, None, None, None, None),
+        (7, 1, None, None, None, None, None, Decimal("0.1800")),
+    ]
+    charge = admin.execute(
+        "SELECT cp.id, cp.car_id, cp.end_date, cp.charge_energy_used, cp.cost, "
+        "ch.battery_level, ch.ideal_battery_range_km "
+        "FROM public.charging_processes AS cp "
+        "LEFT JOIN public.charges AS ch ON ch.charging_process_id = cp.id "
+        "WHERE cp.id IN (1, 2, 3, 4) ORDER BY cp.id, ch.id"
+    ).fetchall()
+    assert charge[0][0:2] == (1, 1) and charge[0][3:5] == (None, None)
+    assert charge[0][5:] == (40, 150)
+    assert charge[1][5:] == (80, None)
+    assert charge[2] == (2, 2, None, None, None, None, None)
+    assert (
+        charge[3][0:5] == (3, 2, charge[3][2], Decimal("13.50"), Decimal("0.00"))
+        and charge[3][5:] == (50, 180)
+    )
+    assert charge[4][0:3] == (4, 1, None) and charge[4][3:] == (None, None, None, None)
+    assert (
+        admin.execute(
+            "SELECT count(*) FROM public.drives "
+            "WHERE start_date < TIMESTAMP '2022-01-01'"
+        ).fetchone()[0]
+        == 1
+    )
+    assert not admin.execute(
+        "SELECT has_column_privilege('matescope_readonly', 'public.cars', 'efficiency', 'SELECT')"
+    ).fetchone()[0]
+    assert not admin.execute(
+        "SELECT has_column_privilege('matescope_readonly', 'public.charges', 'id', 'SELECT')"
+    ).fetchone()[0]
 
 
 def test_window_pagination_timezone_missing_and_old(client: TestClient) -> None:
