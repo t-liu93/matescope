@@ -4,13 +4,15 @@ import base64
 import json
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Annotated, Any, Literal
+from zoneinfo import ZoneInfo
 
 import psycopg
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from psycopg import sql
 from pydantic import BaseModel, field_validator
+from sqlalchemy.orm import Session
 
 from .auth import require_admin, storage
 from .postgresql import CapabilityReason, capability_status, classify, snapshot
@@ -100,6 +102,32 @@ class HistoryCapabilities(BaseModel):
     capabilities: dict[str, Capability]
 
 
+HistoryWindowPreset = Literal[
+    "today",
+    "last_7_days",
+    "last_30_days",
+    "this_month",
+    "this_year",
+    "all_history",
+    "custom",
+]
+
+
+class ResolvedHistoryWindow(BaseModel):
+    """A local-calendar selection resolved once for reuse by later requests."""
+
+    preset: HistoryWindowPreset
+    timezone: str
+    start: datetime | None
+    end: datetime | None
+    is_empty: bool
+
+    @field_validator("start", "end")
+    @classmethod
+    def utc(cls, value: datetime | None) -> datetime | None:
+        return value.replace(tzinfo=UTC) if value and value.tzinfo is None else value
+
+
 @contextmanager
 def connection(request: Request) -> Iterator[psycopg.Connection[dict[str, Any]]]:
     try:
@@ -140,6 +168,126 @@ def vehicles(request: Request) -> Vehicles:
             "SELECT id, name, model FROM public.cars ORDER BY id LIMIT 100"
         ).fetchall()
     return Vehicles(items=[Vehicle(**row) for row in rows])
+
+
+def local_midnight(value: date, timezone: ZoneInfo) -> datetime:
+    """Construct a calendar boundary in the configured zone, never by adding 24 hours."""
+    return datetime.combine(value, time.min, tzinfo=timezone)
+
+
+def resolve_calendar_window(
+    preset: HistoryWindowPreset,
+    timezone: ZoneInfo,
+    resolved_at: datetime,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> tuple[datetime | None, datetime]:
+    """Resolve presets and custom dates to UTC without making a database query."""
+    now = resolved_at.astimezone(UTC)
+    local_today = now.astimezone(timezone).date()
+    if preset == "custom":
+        if (
+            start_date is None
+            or end_date is None
+            or start_date > end_date
+            or end_date > local_today
+        ):
+            raise ValueError
+        start = local_midnight(start_date, timezone).astimezone(UTC)
+        end = min(local_midnight(end_date + timedelta(days=1), timezone).astimezone(UTC), now)
+        return start, end
+    if start_date is not None or end_date is not None:
+        raise ValueError
+    if preset == "today":
+        start = local_midnight(local_today, timezone)
+    elif preset == "last_7_days":
+        start = local_midnight(local_today - timedelta(days=6), timezone)
+    elif preset == "last_30_days":
+        start = local_midnight(local_today - timedelta(days=29), timezone)
+    elif preset == "this_month":
+        start = local_midnight(local_today.replace(day=1), timezone)
+    elif preset == "this_year":
+        start = local_midnight(local_today.replace(month=1, day=1), timezone)
+    elif preset == "all_history":
+        return None, now
+    else:
+        raise ValueError
+    return start.astimezone(UTC), now
+
+
+def vehicle_exists(database: psycopg.Connection[dict[str, Any]], vehicle_id: int) -> bool:
+    row = database.execute("SELECT 1 FROM public.cars WHERE id=%s", (vehicle_id,)).fetchone()
+    return row is not None
+
+
+@router.get("/vehicles/{vehicle_id}/history-window", response_model=ResolvedHistoryWindow)
+def history_window(
+    request: Request,
+    vehicle_id: Annotated[int, Path(ge=1)],
+    preset: HistoryWindowPreset = "last_30_days",
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> ResolvedHistoryWindow:
+    """Resolve a saved-timezone calendar selection for one existing vehicle.
+
+    The response is deliberately a small, stable hand-off: callers retain these
+    UTC bounds for list pagination instead of resolving a new moving "now".
+    """
+    with Session(storage(request).engine) as session:
+        timezone_name = read_settings(session).preferences.timezone
+    try:
+        timezone = ZoneInfo(timezone_name)
+        start, end = resolve_calendar_window(
+            preset, timezone, datetime.now(UTC), start_date, end_date
+        )
+    except (ValueError, OverflowError):
+        raise HTTPException(422, "Invalid history window") from None
+
+    with connection(request) as database:
+        if not vehicle_exists(database, vehicle_id):
+            raise HTTPException(404, "Vehicle not found")
+        if start is None:
+            row = database.execute(
+                "SELECT min(start_date) AS start FROM ("
+                "SELECT start_date FROM public.drives WHERE car_id=%s "
+                "UNION ALL "
+                "SELECT start_date FROM public.charging_processes WHERE car_id=%s"
+                ") AS records",
+                (vehicle_id, vehicle_id),
+            ).fetchone()
+            if row is None or row["start"] is None:
+                return ResolvedHistoryWindow(
+                    preset=preset, timezone=timezone_name, start=None, end=None, is_empty=True
+                )
+            earliest = row["start"]
+            start = (
+                earliest.replace(tzinfo=UTC)
+                if earliest.tzinfo is None
+                else earliest.astimezone(UTC)
+            )
+
+        # At the exact beginning of a local day, a capped today/custom range can
+        # have no duration. Do not issue a misleading zero-width source query.
+        if start >= end:
+            return ResolvedHistoryWindow(
+                preset=preset, timezone=timezone_name, start=start, end=end, is_empty=True
+            )
+        row = database.execute(
+            "SELECT EXISTS("
+            "SELECT 1 FROM public.drives WHERE car_id=%s AND start_date >= %s AND start_date < %s "
+            "UNION ALL "
+            "SELECT 1 FROM public.charging_processes "
+            "WHERE car_id=%s AND start_date >= %s AND start_date < %s"
+            ") AS exists",
+            (vehicle_id, start, end, vehicle_id, start, end),
+        ).fetchone()
+    return ResolvedHistoryWindow(
+        preset=preset,
+        timezone=timezone_name,
+        start=start,
+        end=end,
+        is_empty=not bool(row and row["exists"]),
+    )
 
 
 class Window:

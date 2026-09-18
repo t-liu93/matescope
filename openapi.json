@@ -819,6 +819,103 @@
         }
       }
     },
+    "/api/v1/vehicles/{vehicle_id}/history-window": {
+      "get": {
+        "tags": [
+          "history"
+        ],
+        "summary": "History Window",
+        "description": "Resolve a saved-timezone calendar selection for one existing vehicle.\n\nThe response is deliberately a small, stable hand-off: callers retain these\nUTC bounds for list pagination instead of resolving a new moving \"now\".",
+        "operationId": "history_window_api_v1_vehicles__vehicle_id__history_window_get",
+        "parameters": [
+          {
+            "name": "vehicle_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Vehicle Id"
+            }
+          },
+          {
+            "name": "preset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "today",
+                "last_7_days",
+                "last_30_days",
+                "this_month",
+                "this_year",
+                "all_history",
+                "custom"
+              ],
+              "type": "string",
+              "default": "last_30_days",
+              "title": "Preset"
+            }
+          },
+          {
+            "name": "start_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Date"
+            }
+          },
+          {
+            "name": "end_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolvedHistoryWindow"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/trips": {
       "get": {
         "tags": [
@@ -2410,6 +2507,65 @@
           "recovery_codes"
         ],
         "title": "RecoveryCodesResponse"
+      },
+      "ResolvedHistoryWindow": {
+        "properties": {
+          "preset": {
+            "type": "string",
+            "enum": [
+              "today",
+              "last_7_days",
+              "last_30_days",
+              "this_month",
+              "this_year",
+              "all_history",
+              "custom"
+            ],
+            "title": "Preset"
+          },
+          "timezone": {
+            "type": "string",
+            "title": "Timezone"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "is_empty": {
+            "type": "boolean",
+            "title": "Is Empty"
+          }
+        },
+        "type": "object",
+        "required": [
+          "preset",
+          "timezone",
+          "start",
+          "end",
+          "is_empty"
+        ],
+        "title": "ResolvedHistoryWindow",
+        "description": "A local-calendar selection resolved once for reuse by later requests."
       },
       "SMTPInput": {
         "properties": {

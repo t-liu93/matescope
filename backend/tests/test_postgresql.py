@@ -4,14 +4,16 @@ import base64
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from matescope.data import resolve_calendar_window
 from matescope.main import create_app
 from matescope.postgresql import CAPABILITY_COLUMNS, DataSource, SourceFailure, classify
 from matescope.settings import PostgreSQLResponse
@@ -507,3 +509,94 @@ def test_timestamptz_capability(client: TestClient, admin: psycopg.Connection[An
     )["postgresql"]
     assert after["version"] == before["version"] + 1
     assert after["status"] == "unverified" and after["test_result"] is None
+
+
+def utc_iso(value: datetime) -> str:
+    return value.isoformat().replace("+00:00", "Z")
+
+
+def test_calendar_boundaries_handle_dst_leap_days_and_years() -> None:
+    zone = ZoneInfo("Europe/Amsterdam")
+    now = datetime(2026, 4, 2, 10, 30, tzinfo=UTC)
+
+    start, end = resolve_calendar_window("custom", zone, now, date(2024, 3, 31), date(2024, 4, 1))
+    assert (utc_iso(start), utc_iso(end)) == ("2024-03-30T23:00:00Z", "2024-04-01T22:00:00Z")
+
+    start, end = resolve_calendar_window(
+        "custom", zone, now, date(2024, 10, 27), date(2024, 10, 28)
+    )
+    assert (utc_iso(start), utc_iso(end)) == ("2024-10-26T22:00:00Z", "2024-10-28T23:00:00Z")
+
+    start, end = resolve_calendar_window("custom", zone, now, date(2024, 2, 29), date(2024, 2, 29))
+    assert (utc_iso(start), utc_iso(end)) == ("2024-02-28T23:00:00Z", "2024-02-29T23:00:00Z")
+
+    start, end = resolve_calendar_window("this_year", zone, now)
+    assert (utc_iso(start), utc_iso(end)) == ("2025-12-31T23:00:00Z", "2026-04-02T10:30:00Z")
+
+    start, end = resolve_calendar_window("today", zone, now)
+    assert (utc_iso(start), utc_iso(end)) == ("2026-04-01T22:00:00Z", "2026-04-02T10:30:00Z")
+    start, end = resolve_calendar_window("last_7_days", zone, now)
+    assert (utc_iso(start), utc_iso(end)) == ("2026-03-26T23:00:00Z", "2026-04-02T10:30:00Z")
+    start, end = resolve_calendar_window("last_30_days", zone, now)
+    assert (utc_iso(start), utc_iso(end)) == ("2026-03-03T23:00:00Z", "2026-04-02T10:30:00Z")
+    start, end = resolve_calendar_window("this_month", zone, now)
+    assert (utc_iso(start), utc_iso(end)) == ("2026-03-31T22:00:00Z", "2026-04-02T10:30:00Z")
+    start, end = resolve_calendar_window("all_history", zone, now)
+    assert start is None and utc_iso(end) == "2026-04-02T10:30:00Z"
+
+
+def test_history_window_endpoint_resolves_saved_timezone_and_empty_status(
+    client: TestClient, admin: psycopg.Connection[Any]
+) -> None:
+    save(client, "preferences", {"timezone": "Europe/Amsterdam"})
+    selected = client.get(
+        "/api/v1/vehicles/1/history-window",
+        params={"preset": "custom", "start_date": "2024-06-11", "end_date": "2024-06-11"},
+    )
+    assert selected.status_code == 200, selected.text
+    assert selected.headers["cache-control"] == "no-store"
+    assert selected.json() == {
+        "preset": "custom",
+        "timezone": "Europe/Amsterdam",
+        "start": "2024-06-10T22:00:00Z",
+        "end": "2024-06-11T22:00:00Z",
+        "is_empty": False,
+    }
+
+    all_history = client.get("/api/v1/vehicles/2/history-window", params={"preset": "all_history"})
+    assert all_history.status_code == 200, all_history.text
+    assert all_history.json()["start"] == "2021-02-03T09:00:00Z"
+    assert all_history.json()["end"] is not None and not all_history.json()["is_empty"]
+
+    admin.execute("INSERT INTO public.cars (id, name, model) VALUES (99, 'EMPTY', NULL)")
+    try:
+        empty = client.get("/api/v1/vehicles/99/history-window", params={"preset": "all_history"})
+        assert empty.status_code == 200, empty.text
+        assert empty.json() == {
+            "preset": "all_history",
+            "timezone": "Europe/Amsterdam",
+            "start": None,
+            "end": None,
+            "is_empty": True,
+        }
+    finally:
+        admin.execute("DELETE FROM public.cars WHERE id=99")
+
+
+def test_history_window_rejects_invalid_dates_and_unknown_vehicles(client: TestClient) -> None:
+    cases = (
+        {"preset": "custom"},
+        {"preset": "custom", "start_date": "2024-02-30", "end_date": "2024-03-01"},
+        {"preset": "custom", "start_date": "2024-03-02", "end_date": "2024-03-01"},
+        {"preset": "today", "start_date": "2024-03-01"},
+        {"preset": "all_history", "end_date": "2024-03-01"},
+        {
+            "preset": "custom",
+            "start_date": (datetime.now(UTC).date() + timedelta(days=2)).isoformat(),
+            "end_date": (datetime.now(UTC).date() + timedelta(days=2)).isoformat(),
+        },
+    )
+    for params in cases:
+        response = client.get("/api/v1/vehicles/1/history-window", params=params)
+        assert response.status_code == 422, response.text
+    assert client.get("/api/v1/vehicles/999/history-window").status_code == 404

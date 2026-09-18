@@ -446,6 +446,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/vehicles/{vehicle_id}/history-window": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * History Window
+         * @description Resolve a saved-timezone calendar selection for one existing vehicle.
+         *
+         *     The response is deliberately a small, stable hand-off: callers retain these
+         *     UTC bounds for list pagination instead of resolving a new moving "now".
+         */
+        get: operations["history_window_api_v1_vehicles__vehicle_id__history_window_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/trips": {
         parameters: {
             query?: never;
@@ -1161,6 +1184,25 @@ export interface components {
             status: "authenticated";
             /** Recovery Codes */
             recovery_codes: string[];
+        };
+        /**
+         * ResolvedHistoryWindow
+         * @description A local-calendar selection resolved once for reuse by later requests.
+         */
+        ResolvedHistoryWindow: {
+            /**
+             * Preset
+             * @enum {string}
+             */
+            preset: "today" | "last_7_days" | "last_30_days" | "this_month" | "this_year" | "all_history" | "custom";
+            /** Timezone */
+            timezone: string;
+            /** Start */
+            start: string | null;
+            /** End */
+            end: string | null;
+            /** Is Empty */
+            is_empty: boolean;
         };
         /** SMTPInput */
         SMTPInput: {
@@ -2102,6 +2144,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Vehicles"];
+                };
+            };
+        };
+    };
+    history_window_api_v1_vehicles__vehicle_id__history_window_get: {
+        parameters: {
+            query?: {
+                preset?: "today" | "last_7_days" | "last_30_days" | "this_month" | "this_year" | "all_history" | "custom";
+                start_date?: string | null;
+                end_date?: string | null;
+            };
+            header?: never;
+            path: {
+                vehicle_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResolvedHistoryWindow"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
