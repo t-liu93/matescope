@@ -440,3 +440,55 @@ test.describe("T09 calendar history filters", () => {
     await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
   });
 });
+
+test.describe("T10 visual foundations", () => {
+  test("follows explicit light and dark themes with readable metric states", async ({ page }) => {
+    await mockHistoryApi(page);
+    await localTiles(page);
+    await page.goto("/trips");
+    await expect(page.locator(".metric-value-empty").first()).toBeVisible();
+    const contrast = (foreground: string, background: string) => {
+      const parse = (value: string) => {
+        const channels = value.match(/\d+(?:\.\d+)?/g)?.map(Number) ?? [];
+        return channels.slice(0, 3).map((channel) => {
+          const normalized = channel / 255;
+          return normalized <= 0.03928 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+        });
+      };
+      const luminance = (value: string) => {
+        const [red, green, blue] = parse(value);
+        return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+      };
+      const foregroundLuminance = luminance(foreground);
+      const backgroundLuminance = luminance(background);
+      return (Math.max(foregroundLuminance, backgroundLuminance) + 0.05)
+        / (Math.min(foregroundLuminance, backgroundLuminance) + 0.05);
+    };
+    for (const scheme of ["light", "dark"] as const) {
+      await page.evaluate((value) => document.documentElement.setAttribute("data-mantine-color-scheme", value), scheme);
+      const styles = await page.locator("body").evaluate((element) => {
+        const body = getComputedStyle(element);
+        const empty = getComputedStyle(document.querySelector(".metric-value-empty")!);
+        return { background: body.backgroundColor, empty: empty.color };
+      });
+      expect(contrast(styles.empty, styles.background)).toBeGreaterThanOrEqual(4.5);
+      expect(styles.background).toBe(scheme === "light" ? "rgb(248, 249, 250)" : "rgb(20, 21, 23)");
+    }
+  });
+
+  test("keeps the navigation menu touchable and keyboard focus visible", async ({ page }) => {
+    await mockHistoryApi(page);
+    await localTiles(page);
+    await page.goto("/trips");
+    await page.getByRole("button", { name: "History navigation", exact: true }).click();
+    const items = page.getByRole("menuitem");
+    await expect(items).toHaveCount(3);
+    for (let index = 0; index < await items.count(); index += 1) {
+      const box = await items.nth(index).boundingBox();
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+    }
+    await items.first().focus();
+    const outline = await items.first().evaluate((element) => getComputedStyle(element).outlineStyle);
+    expect(outline).toBe("solid");
+  });
+});

@@ -56,6 +56,7 @@ import type { components } from "./api/schema";
 import i18n from "./i18n";
 import { PwaStatus, registerPwa, useOfflineVehicleDataGuard } from "./pwa";
 import { HistoryContextProvider, useHistoryContext } from "./history-context";
+import appTheme from "./theme";
 
 type Settings = components["schemas"]["SettingsResponse"];
 type Step = components["schemas"]["Onboarding"]["step"];
@@ -1524,7 +1525,7 @@ function App({ client = queryClient }: { client?: QueryClient }) {
   const { i18n: translator } = useTranslation();
   useOfflineVehicleDataGuard(client);
   return (
-    <MantineProvider defaultColorScheme="auto">
+    <MantineProvider theme={appTheme} defaultColorScheme="auto">
       <DatesProvider settings={{ firstDayOfWeek: 1, locale: translator.language.startsWith("zh") ? "zh-cn" : "en" }}>
       <QueryClientProvider client={client}>
         <BrowserRouter>

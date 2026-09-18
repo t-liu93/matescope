@@ -59,7 +59,14 @@ function formatDate(value: string | null, timezone: string) {
 }
 
 function value(value: number | null, unit: string) {
-  return value === null ? "—" : `${value.toLocaleString(undefined, { maximumFractionDigits: 1 })} ${unit}`;
+  if (value === null) return <span className="metric-value metric-value-empty">—</span>;
+  const formatted = value.toLocaleString(undefined, { maximumFractionDigits: 1 });
+  return (
+    <span className="metric" aria-label={`${formatted} ${unit}`}>
+      <span className="metric-value">{formatted}</span>{" "}
+      <span className="metric-unit">{unit}</span>
+    </span>
+  );
 }
 
 function HistoryFailure({ retry }: { retry: () => void }) {

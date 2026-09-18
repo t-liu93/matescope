@@ -1,5 +1,84 @@
-:root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
-body { margin: 0; min-width: 320px; background: light-dark(#f8f9fa, #141517); }
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+[data-mantine-color-scheme="light"] body {
+  background: #f8f9fa;
+  color: #202124;
+}
+
+[data-mantine-color-scheme="dark"] body {
+  background: #141517;
+  color: #f1f3f5;
+}
+
+button, a, input, select, textarea { touch-action: manipulation; }
+
+.mantine-Menu-item {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+
+.mantine-Button-root,
+.mantine-Input-input,
+.mantine-Select-input,
+.mantine-DatePickerInput-input {
+  min-height: 44px;
+}
+
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline-offset: 2px;
+}
+
+[data-mantine-color-scheme="light"] :is(button, a, input, select, textarea):focus-visible {
+  outline: 3px solid #4263eb;
+}
+
+[data-mantine-color-scheme="dark"] :is(button, a, input, select, textarea):focus-visible {
+  outline: 3px solid #91a7ff;
+}
+
+.metric {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-value {
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.metric-unit {
+  font-size: 0.875em;
+  font-weight: 500;
+}
+
+[data-mantine-color-scheme="light"] .metric-unit { color: #68707d; }
+[data-mantine-color-scheme="dark"] .metric-unit { color: #adb5bd; }
+[data-mantine-color-scheme="light"] .metric-value-empty { color: #495057; }
+[data-mantine-color-scheme="dark"] .metric-value-empty { color: #ced4da; }
+
 .trajectory-map { height: min(52vh, 420px); min-height: 240px; width: 100%; }
 .shell-header { padding-inline: 8px; }
-.shell-header-actions .mantine-Button-root { height: 32px; min-height: 32px; padding-inline: 6px; }
+.shell-header-actions .mantine-Button-root { min-height: 44px; padding-inline: 8px; }
+
+@media (max-width: 30rem) {
+  .mantine-Container-root { padding-inline: 16px; }
+  .shell-header { padding-inline: 4px; }
+  .shell-header-actions { gap: 0; }
+  .shell-header-actions .mantine-Button-root { padding-inline: 6px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
