@@ -6,7 +6,7 @@ This is the scope and milestone overview, not a frozen implementation specificat
 
 ## Direction and decisions
 
-Confirmed direction: a self-hosted, responsive React PWA with independent authentication, a Python/FastAPI backend, read-only TeslaMate history, optional MQTT, and an independently deployable container. The owner will integrate deployment through their own installer. First prove real data access; then build the daily-use dashboard.
+Confirmed direction: a self-hosted, responsive React PWA with independent authentication, a Python/FastAPI backend, read-only TeslaMate history, optional MQTT, and an independently deployable container. The product aims to replace TeslaMate Grafana with a modern, informative interface that makes common information easy to reach on phones, tablets, and desktops. The owner will integrate deployment through their own installer. M0 established the data-access foundation; M1 designs the daily-use dashboard.
 
 | Area | Current direction | Still to validate during scaffolding |
 | --- | --- | --- |
@@ -33,11 +33,13 @@ Confirmed direction: a self-hosted, responsive React PWA with independent authen
 
 | Milestone | Outcome | Status |
 | --- | --- | --- |
-| [M0](milestones/M0.md) | Local Compose preview, web onboarding, read-only data, backup/restore, CI and dual-platform release, VPS acceptance | T01–T07 implemented and locally validated; T08 validated in remote CI and native amd64/arm64 image checks, `v0.1.0-alpha.1` published to GHCR with anonymous pull verified; T09 VPS acceptance pending |
-| Post-alpha enhancements | Password-manager hints, installable PWA, optional TOTP and recovery codes | Implemented and locally validated; offline vehicle data is hidden and cleared; manual acceptance and release pending |
-| M1 | Daily-use overview, trip and charging flows, responsive navigation and installable PWA | Proposed; detail after M0 |
+| [M0](milestones/M0.md) | Local Compose preview, web onboarding, read-only data, backup/restore, CI and dual-platform release, VPS acceptance | Complete: the owner confirmed the walkthrough and M0 closure. Local validation and image delivery are recorded; this closure does not assert that every originally planned manual test was individually performed. |
+| Post-alpha enhancements | Password-manager hints, installable PWA, optional TOTP and recovery codes | Owner walkthrough completed and 2FA creation/use confirmed. `v0.1.0-alpha.2` published; main CI, release checks, native amd64/arm64 image validation, and anonymous pull passed. Offline vehicle data is hidden and cleared. |
+| [M1](milestones/M1.md) | Concise overview, complete-history date picker, trip/charge summaries and charts, responsive navigation; reuse existing PWA foundations | Design documented as 36 bounded steps; T01–T36 not started. PostgreSQL-only data in M1; continuous MQTT and advanced analysis excluded. Current authorization covers design documentation only. |
 | M2 | Coverage inventory and prioritized statistics: efficiency, range/battery, parking drain, locations | Proposed; detail after M1 |
 | M3 | Additional comparisons, activity timeline, and performance/usability improvements based on use | Proposed; scope not committed |
+
+Release baseline: [`v0.1.0-alpha.2`](https://github.com/t-liu93/matescope/releases/tag/v0.1.0-alpha.2), image `ghcr.io/t-liu93/matescope:0.1.0-alpha.2`, source `646fdf82d2fdde7a46d7199e51b8bd01be8d926a`. Release publication does not establish that this version has been deployed on the VPS.
 
 M0 includes MQTT/SMTP configuration and explicit testing, not live dashboards or notification rules. No later milestone implies full Grafana parity. Track local validation, image publication, and VPS acceptance separately; all three must pass before M0 is complete.
 
