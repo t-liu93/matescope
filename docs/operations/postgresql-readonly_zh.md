@@ -77,13 +77,17 @@ ROLLBACK;
 SQL
 ```
 
-对照[数据适配器](../../backend/matescope/postgresql.py)及准备脚本核对所需字段与类型。如果目标不正确、所需表或类型不匹配，或 `matescope_readonly` 已存在，先停止。已有角色需要另行检查成员关系、所有权和有效权限；本脚本故意报错，不直接复用已有角色。
+对照[数据适配器](../../backend/matescope/postgresql.py)及准备脚本核对所需字段与类型。新建账号时，如果目标不正确、所需表或类型不匹配，或 `matescope_readonly` 已存在，先停止。升级已有账号时，先检查其成员关系、所有权和有效权限；升级脚本不会审计或修正其其他权限。
 
 `PUBLIC` 授权同样适用于新角色。发现共享写权限、凭据表读取、模式创建权限或可执行的 security-definer 函数时，先调查再继续。不要自动撤销 `PUBLIC` 权限，现有服务可能依赖它。这些系统目录查询是有限的预检，不是对所有函数及扩展的完整审计。
 
-## 3. 创建账号——明确的数据库变更
+## 3. 准备访问——明确的数据库变更
 
-只有所有者审阅目标和脚本，并授权角色变更后，才执行本节。脚本创建 `matescope_readonly`，授予数据库 `CONNECT`、模式 `USAGE`，以及四张表所需列的 `SELECT`；把新角色默认事务设为只读，并提示两次输入新密码。它不修改已有角色或密码，也不自动授权未来新增表。访问边界依靠实际授权，而不能只依赖默认事务只读设置。
+只有所有者审阅目标、选择脚本并授权角色变更后，才执行本节。新建账号路径授予 M0 基础列和明确列出的 M1 历史字段；已有账号路径只添加这些 M1 列：`cars.efficiency`；`drives` 的 M1 关联/续航字段；`charging_processes` 的地点/SOC/能量/费用字段；`positions` 的最新值与序列字段；以及 `charges`、`addresses`、`geofences` 的列出字段。两条路径都不授予 `tokens`、`users`、VIN 或未来表。访问边界依靠实际列授权，不能只依赖默认事务只读设置。
+
+### 新建专用账号
+
+`prepare-readonly.sql` 创建 `matescope_readonly`，授予数据库 `CONNECT`、模式 `USAGE` 以及上述 M0 基础和 M1 列；它把新角色默认事务设为只读，并提示两次输入新密码。角色已存在时它会刻意失败；不会修改已有角色或密码。
 
 在开发机所选 MateScope 发布版本的检出目录中，审阅并传输脚本。必要时选择未占用的目标文件名：
 
@@ -117,6 +121,28 @@ cat "$HOME/matescope-prepare-readonly.sql"
 
 在交互提示中为 `matescope_readonly` 输入新密码，不要将密码放在命令参数中。成功应以 `COMMIT` 结束。SQL 报错会停止文件执行，连接关闭时未提交事务回滚。超时、断连或结果不确定时，先检查角色是否已存在，再决定是否重试；不要自动删除或覆盖账号。这些角色及授权变更不需要重启 PostgreSQL 或重新加载配置。
 
+### 升级已明确选择的账号
+
+`upgrade-readonly.sql` 仅用于已经存在且所有者明确选择的账号。它不创建角色、不改密码、不设角色默认值、不撤销授权、不授予数据库 `CONNECT` 或模式 `USAGE`，也不会移除无关权限。它只添加上述 M1 列，可安全重复执行。它假设所选账号已有 M0 基础授权和连接前提；如缺失，应通过单独审阅的 M0 流程修复后再继续。
+
+与新建账号脚本相同，先逐字审阅并传输 `scripts/postgresql/upgrade-readonly.sql`。将审阅过的本地副本存为 `$HOME/matescope-upgrade-readonly.sql` 后，设置显式选定的角色并执行：
+
+```bash
+db_role='REPLACE_WITH_EXISTING_READER'
+(
+  set -eu
+  db_script=$(docker exec "$db_container" mktemp /tmp/matescope-readonly-upgrade.XXXXXX)
+  trap 'docker exec "$db_container" rm -f -- "$db_script"' EXIT
+  docker cp "$HOME/matescope-upgrade-readonly.sql" "${db_container}:${db_script}"
+  docker exec -i \
+    -e 'PGOPTIONS=-c statement_timeout=5000 -c lock_timeout=2000' \
+    "$db_container" psql -X -v ON_ERROR_STOP=1 -U "$db_owner" -d "$db_name" \
+    -v "matescope_role=$db_role" -f "$db_script"
+)
+```
+
+未提供 `matescope_role` 或该角色不存在时，脚本会在授权前停止。成功以 `COMMIT` 结束。目标已有任一列授权时，PostgreSQL 保持该授权；不会撤销任何授权。不要把此路径用于管理员、成员关系未经审阅的角色，或可读取 `tokens`、`users` 的账号。
+
 ## 4. 验证并连接 MateScope
 
 在 MateScope 的 PostgreSQL 设置中启用连接，填写：
@@ -126,8 +152,8 @@ cat "$HOME/matescope-prepare-readonly.sql"
 | Host | 共享 Docker 网络中的 PostgreSQL 服务别名，不是 localhost |
 | Port | PostgreSQL 内部端口，通常为 `5432` |
 | Database | 预检确认的 TeslaMate 数据库名 |
-| Username | `matescope_readonly` |
-| Password | 上面输入的新密码 |
+| Username | `matescope_readonly`，或经过明确审阅并升级的已有角色 |
+| Password | 上面输入的新密码，或已有所选角色的密码 |
 | SSL mode | 与服务器实际配置一致，不要假定已启用 TLS |
 
 如果 PostgreSQL 未启用 SSL，`disable` 与现状匹配，但**不提供传输加密**；连接应保留在预期的主机内部 Docker 网络。服务器已启用 TLS 时，选择与证书匹配的证书验证设置；`prefer` 不保证加密。本指南不修改服务器 TLS 或认证配置。

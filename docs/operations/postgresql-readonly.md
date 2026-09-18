@@ -77,13 +77,17 @@ ROLLBACK;
 SQL
 ```
 
-Check required columns/types against [the adapter](../../backend/matescope/postgresql.py) and the preparation script. Stop if the target is wrong, required tables/types differ, or `matescope_readonly` already exists. Existing roles need a separate membership, ownership, and effective-permission review; this script intentionally fails rather than reusing them.
+Check required columns/types against [the adapter](../../backend/matescope/postgresql.py) and the preparation scripts. For a new account, stop if the target is wrong, required tables/types differ, or `matescope_readonly` already exists. For an existing account, inspect its membership, ownership, and effective permissions before selecting it; the upgrade script does not audit or correct its other privileges.
 
 `PUBLIC` grants also apply to a new role. Investigate any shared write privileges, credential-table reads, schema creation grants, or executable security-definer functions before proceeding. Do not automatically revoke `PUBLIC` privileges: existing services may depend on them. These catalog checks are bounded preflight checks, not a complete audit of every function or extension.
 
-## 3. Create the account — explicit database change
+## 3. Prepare access — explicit database change
 
-Proceed only after the owner has reviewed the target and script and authorized the role change. The script creates `matescope_readonly`, grants database `CONNECT`, schema `USAGE`, and only the required columns' `SELECT` permissions on four tables. It sets the new role's default transactions to read-only and prompts twice for a new password. It does not change existing roles/passwords or grant future tables automatically. Actual grants, rather than the default read-only setting alone, enforce the access boundary.
+Proceed only after the owner has reviewed the target, selected script, and authorized the role change. The new-account path grants the M0 base columns plus M1's explicitly listed history columns; the existing-account path adds only those M1 columns: `cars.efficiency`; the M1 join/range columns on `drives`; the place/SOC/energy/cost columns on `charging_processes`; the latest-value and series columns on `positions`; the listed columns on `charges`, `addresses`, and `geofences`. Neither path grants `tokens`, `users`, VINs, or future tables. Actual column grants, rather than a default read-only setting alone, enforce the access boundary.
+
+### New dedicated account
+
+`prepare-readonly.sql` creates `matescope_readonly`, grants database `CONNECT`, schema `USAGE`, and the M0 base plus M1 columns above. It sets that new role's default transactions to read-only and prompts twice for a new password. It intentionally fails if the role already exists; it does not change existing roles/passwords.
 
 From the development machine, at the selected MateScope release checkout, review and transfer the script. Use an unused destination filename if necessary:
 
@@ -117,6 +121,28 @@ Confirm the hash matches the local reviewed script before executing. The followi
 
 Enter a new password for `matescope_readonly` at the interactive prompts; do not put it in command arguments. Success ends with `COMMIT`. A SQL error stops the file and the uncommitted transaction rolls back when the connection closes. On a timeout, disconnect, or uncertain result, inspect whether the role exists before retrying; never drop or overwrite an account automatically. No PostgreSQL restart or configuration reload is required for these role/grant changes.
 
+### Existing selected account
+
+`upgrade-readonly.sql` is only for an account that already exists and that the owner explicitly selected. It does not create a role, change a password, set role defaults, revoke grants, grant database `CONNECT` or schema `USAGE`, or remove unrelated permissions. It adds only the M1 columns above and can safely be run again. It assumes the selected account already has the M0 base grants and the connection prerequisites; stop and correct those through the separately reviewed M0 procedure if they are absent.
+
+Review and transfer `scripts/postgresql/upgrade-readonly.sql` exactly as for the new-account script. With its reviewed local copy at `$HOME/matescope-upgrade-readonly.sql`, set the explicit selected role and run:
+
+```bash
+db_role='REPLACE_WITH_EXISTING_READER'
+(
+  set -eu
+  db_script=$(docker exec "$db_container" mktemp /tmp/matescope-readonly-upgrade.XXXXXX)
+  trap 'docker exec "$db_container" rm -f -- "$db_script"' EXIT
+  docker cp "$HOME/matescope-upgrade-readonly.sql" "${db_container}:${db_script}"
+  docker exec -i \
+    -e 'PGOPTIONS=-c statement_timeout=5000 -c lock_timeout=2000' \
+    "$db_container" psql -X -v ON_ERROR_STOP=1 -U "$db_owner" -d "$db_name" \
+    -v "matescope_role=$db_role" -f "$db_script"
+)
+```
+
+The script stops before any grant if `matescope_role` is omitted or does not name an existing role. A successful run ends with `COMMIT`. If the target already has any listed grant, PostgreSQL leaves it in place; no grant is revoked. Do not use this path for an administrator, a role with memberships you have not reviewed, or an account that can read `tokens` or `users`.
+
 ## 4. Verify and connect MateScope
 
 In MateScope's PostgreSQL settings, enable the connection and enter:
@@ -126,8 +152,8 @@ In MateScope's PostgreSQL settings, enable the connection and enter:
 | Host | PostgreSQL service alias on the shared Docker network, not localhost |
 | Port | Internal PostgreSQL port, normally `5432` |
 | Database | The inspected TeslaMate database name |
-| Username | `matescope_readonly` |
-| Password | The new password entered above |
+| Username | `matescope_readonly`, or the explicitly reviewed upgraded role |
+| Password | The new password, or the existing selected role's password |
 | SSL mode | Match the actual server configuration; do not assume TLS is enabled |
 
 If PostgreSQL has SSL disabled, `disable` matches that configuration and provides **no transport encryption**. Keep that connection on the intended host-local Docker network. For a TLS-enabled server, choose certificate-verifying settings appropriate to its certificates; `prefer` does not guarantee encryption. This guide does not change the server's TLS or authentication configuration.
