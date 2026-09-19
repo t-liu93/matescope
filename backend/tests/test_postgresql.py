@@ -1041,6 +1041,168 @@ def test_history_capabilities_validate_all_added_columns(
         )
 
 
+def test_trip_series_is_local_when_optional_columns_are_unreadable(
+    client: TestClient,
+) -> None:
+    response = client.get("/api/v1/trips/6/series")
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["trip_id"] == 6
+    assert result["capability"] == {"available": False, "reason": "insufficient_permissions"}
+    assert len(result["series"]) == 6
+    assert all(
+        series["capability"] == {"available": False, "reason": "insufficient_permissions"}
+        and series["points"] == []
+        for series in result["series"]
+    )
+
+
+def test_trip_series_raw_samples_keep_gaps_nulls_negative_power_and_equal_times(
+    client: TestClient, admin: psycopg.Connection[Any]
+) -> None:
+    """T21 retains raw ordering and never joins samples across a missing interval."""
+    original = admin.execute(
+        "SELECT id,speed,power,battery_level,inside_temp,outside_temp,elevation "
+        "FROM public.positions WHERE id=ANY(%s) ORDER BY id",
+        ([20001, 20002],),
+    ).fetchall()
+    collision = admin.execute("SELECT id FROM public.positions WHERE id=20003").fetchall()
+    assert not collision, "T21 fixture identifier must be unused"
+    try:
+        admin.execute(
+            "UPDATE public.positions SET speed=0,power=-1.5,battery_level=75,inside_temp=19,"
+            "outside_temp=4,elevation=3 WHERE id=20001"
+        )
+        admin.execute(
+            "UPDATE public.positions SET speed=0,power=-8,battery_level=74,inside_temp=NULL,"
+            "outside_temp=5,elevation=6 WHERE id=20002"
+        )
+        admin.execute(
+            "INSERT INTO public.positions "
+            "(id,car_id,drive_id,date,battery_level,speed,power,inside_temp,"
+            "outside_temp,elevation) "
+            "SELECT 20003,car_id,drive_id,date,73,2,-3,20,6,7 FROM public.positions WHERE id=20002"
+        )
+        with optional_grants(admin):
+            response = client.get("/api/v1/trips/6/series")
+            assert response.status_code == 200, response.text
+            result = response.json()
+            assert result["capability"] == {"available": True, "reason": None}
+            assert all(series["capability"] == {"available": True, "reason": None}
+                       for series in result["series"])
+            assert {item["name"] for item in result["series"]} == {
+                "speed", "power", "battery", "inside_temperature", "outside_temperature",
+                "elevation",
+            }
+            power = next(item for item in result["series"] if item["name"] == "power")
+            assert power["unit"] == "kW"
+            assert power["sample_count"] == power["bucket_count"] == 3
+            assert power["aggregation"] == "raw"
+            assert [point["value"] for point in power["points"]] == [-1.5, -8, -3]
+            assert [point["discontinuity"] for point in power["points"]] == [False, True, False]
+            inside = next(item for item in result["series"] if item["name"] == "inside_temperature")
+            assert inside["points"][1]["value"] is None
+            assert inside["points"][1]["discontinuity"] is True
+    finally:
+        admin.execute("DELETE FROM public.positions WHERE id=20003")
+        for row in original:
+            admin.execute(
+                "UPDATE public.positions SET speed=%s,power=%s,battery_level=%s,inside_temp=%s,"
+                "outside_temp=%s,elevation=%s WHERE id=%s",
+                (
+                    row[1], row[2], row[3], row[4], row[5], row[6], row[0],
+                ),
+            )
+        assert not admin.execute("SELECT id FROM public.positions WHERE id=20003").fetchall()
+
+
+def test_trip_series_long_records_use_at_most_600_sql_buckets(
+    client: TestClient, admin: psycopg.Connection[Any]
+) -> None:
+    original = admin.execute(
+        "SELECT id,power,battery_level FROM public.positions WHERE id=ANY(%s) ORDER BY id",
+        ([10000, 15000],),
+    ).fetchall()
+    try:
+        admin.execute("UPDATE public.positions SET power=-4,battery_level=80 WHERE id=10000")
+        admin.execute("UPDATE public.positions SET power=-2,battery_level=70 WHERE id=15000")
+        with optional_grants(admin):
+            response = client.get("/api/v1/trips/1/series")
+            assert response.status_code == 200, response.text
+            power = next(item for item in response.json()["series"] if item["name"] == "power")
+            battery = next(item for item in response.json()["series"] if item["name"] == "battery")
+            assert power["sample_count"] == 5001
+            assert 1 <= power["bucket_count"] <= 600
+            assert power["aggregation"] == "mean_min_max"
+            assert any(point["min"] is not None and point["min"] < 0 for point in power["points"])
+            assert battery["aggregation"] == "last"
+            assert any(point["value"] is not None for point in battery["points"])
+    finally:
+        for row in original:
+            admin.execute(
+                "UPDATE public.positions SET power=%s,battery_level=%s WHERE id=%s",
+                (row[1], row[2], row[0]),
+            )
+
+
+def test_trip_series_long_records_make_first_single_sample_bucket_continuous(
+    client: TestClient, admin: psycopg.Connection[Any]
+) -> None:
+    """The first aggregate bucket has no prior row, so it must still be a bool."""
+    identifiers = list(range(10000, 10010))
+    original = admin.execute(
+        "SELECT id,date,power FROM public.positions WHERE id=ANY(%s) ORDER BY id", (identifiers,)
+    ).fetchall()
+    assert len(original) == len(identifiers), "T21 long-record fixture rows must exist"
+    try:
+        # Keep only id 10000 in the first equal-width bucket.  The next eight
+        # values share id 10009's timestamp, which remains in the next bucket.
+        admin.execute(
+            "UPDATE public.positions SET date=(SELECT date FROM public.positions WHERE id=10009) "
+            "WHERE id=ANY(%s)",
+            (list(range(10001, 10009)),),
+        )
+        admin.execute("UPDATE public.positions SET power=-4 WHERE id=10000")
+        with optional_grants(admin):
+            response = client.get("/api/v1/trips/1/series")
+            assert response.status_code == 200, response.text
+            power = next(item for item in response.json()["series"] if item["name"] == "power")
+            assert power["sample_count"] > 600
+            assert power["aggregation"] == "mean_min_max"
+            assert power["points"][0]["discontinuity"] is False
+            assert all(isinstance(point["discontinuity"], bool) for point in power["points"])
+    finally:
+        for row in original:
+            admin.execute(
+                "UPDATE public.positions SET date=%s,power=%s WHERE id=%s",
+                (row[1], row[2], row[0]),
+            )
+        assert admin.execute(
+            "SELECT id,date,power FROM public.positions WHERE id=ANY(%s) ORDER BY id",
+            (identifiers,),
+        ).fetchall() == original
+
+
+def test_trip_series_missing_one_column_only_hides_its_own_series(
+    client: TestClient, admin: psycopg.Connection[Any]
+) -> None:
+    with optional_grants(admin):
+        with mutation(
+            admin,
+            "REVOKE SELECT (elevation) ON public.positions FROM matescope_readonly",
+            "GRANT SELECT (elevation) ON public.positions TO matescope_readonly",
+        ):
+            response = client.get("/api/v1/trips/6/series")
+            assert response.status_code == 200, response.text
+            series = {item["name"]: item for item in response.json()["series"]}
+            assert series["elevation"]["capability"] == {
+                "available": False,
+                "reason": "insufficient_permissions",
+            }
+            assert series["elevation"]["points"] == []
+            assert series["power"]["capability"] == {"available": True, "reason": None}
+
+
 def test_history_capabilities_report_schema_and_permission_separately(
     client: TestClient, admin: psycopg.Connection[Any]
 ) -> None:

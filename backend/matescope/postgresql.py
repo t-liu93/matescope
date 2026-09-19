@@ -111,6 +111,14 @@ CAPABILITY_COLUMNS: dict[str, dict[str, tuple[str, ...]]] = {
             "elevation",
         ),
     },
+    # Keep individual series separately diagnosable: a legacy role missing one
+    # optional measurement must still be able to chart the other measurements.
+    "trip_series_speed": {"positions": ("speed",)},
+    "trip_series_power": {"positions": ("power",)},
+    "trip_series_battery": {"positions": ("battery_level",)},
+    "trip_series_inside_temperature": {"positions": ("inside_temp",)},
+    "trip_series_outside_temperature": {"positions": ("outside_temp",)},
+    "trip_series_elevation": {"positions": ("elevation",)},
     "charge_series": {
         "charges": (
             "id",

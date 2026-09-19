@@ -166,6 +166,51 @@ class HistoryCapabilities(BaseModel):
     capabilities: dict[str, Capability]
 
 
+class SeriesPoint(BaseModel):
+    """One raw sample or one equal-width aggregate bucket."""
+
+    time: datetime
+    mean: float | None = None
+    min: float | None = None
+    max: float | None = None
+    value: float | None = None
+    discontinuity: bool
+
+    @field_validator("time")
+    @classmethod
+    def utc(cls, value: datetime) -> datetime:
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value
+
+
+type SeriesName = Literal[
+    "speed", "power", "battery", "inside_temperature", "outside_temperature", "elevation"
+]
+type SeriesAggregation = Literal["raw", "mean_min_max", "last"]
+
+
+class TimeSeries(BaseModel):
+    name: SeriesName
+    unit: str
+    start: datetime | None
+    end: datetime | None
+    sample_count: int
+    bucket_count: int
+    aggregation: SeriesAggregation
+    capability: Capability
+    points: list[SeriesPoint]
+
+    @field_validator("start", "end")
+    @classmethod
+    def utc(cls, value: datetime | None) -> datetime | None:
+        return value.replace(tzinfo=UTC) if value and value.tzinfo is None else value
+
+
+class TripSeries(BaseModel):
+    trip_id: int
+    capability: Capability
+    series: list[TimeSeries]
+
+
 HistoryWindowPreset = Literal[
     "today",
     "last_7_days",
@@ -956,6 +1001,129 @@ def trip(request: Request, trip_id: int) -> Trip | Charge:
 @router.get("/charges/{charge_id}", response_model=Charge)
 def charge(request: Request, charge_id: int) -> Trip | Charge:
     return detail(request, charge_id, "charges")
+
+
+TRIP_SERIES: tuple[tuple[SeriesName, str, str, SeriesAggregation, str], ...] = (
+    ("speed", "speed", "km/h", "mean_min_max", "trip_series_speed"),
+    ("power", "power", "kW", "mean_min_max", "trip_series_power"),
+    ("battery", "battery_level", "%", "last", "trip_series_battery"),
+    (
+        "inside_temperature", "inside_temp", "°C", "mean_min_max", "trip_series_inside_temperature"
+    ),
+    (
+        "outside_temperature", "outside_temp", "°C", "mean_min_max",
+        "trip_series_outside_temperature",
+    ),
+    ("elevation", "elevation", "m", "mean_min_max", "trip_series_elevation"),
+)
+SERIES_BUCKET_LIMIT = 600
+
+
+def trip_series_metadata(
+    database: psycopg.Connection[dict[str, Any]], trip_id: int
+) -> dict[str, Any]:
+    row = database.execute(
+        "SELECT count(*) AS sample_count, min(date) AS start, max(date) AS end "
+        "FROM public.positions WHERE drive_id=%s",
+        (trip_id,),
+    ).fetchone()
+    return row or {"sample_count": 0, "start": None, "end": None}
+
+
+def trip_series_points(
+    database: psycopg.Connection[dict[str, Any]],
+    trip_id: int,
+    column: str,
+    sample_count: int,
+) -> list[dict[str, Any]]:
+    """Return bounded raw rows or SQL aggregates, retaining missing-data breaks.
+
+    ``column`` only comes from TRIP_SERIES.  It is deliberately interpolated
+    into the fixed projection rather than accepting a client-provided name.
+    """
+    value = (
+        f"CASE WHEN p.{column}::text IN ('NaN', 'Infinity', '-Infinity') "
+        f"THEN NULL ELSE p.{column} END"
+    )
+    if sample_count <= SERIES_BUCKET_LIMIT:
+        return database.execute(
+            "WITH samples AS ("
+            f"SELECT p.id,p.date,{value} AS value FROM public.positions AS p WHERE p.drive_id=%s"
+            "), marked AS (SELECT *,lag(date) OVER (ORDER BY date,id) AS previous_time "
+            "FROM samples) "
+            "SELECT date AS time,value AS mean,value AS min,value AS max,value,"
+            "coalesce(value IS NULL OR date-previous_time > interval '5 minutes',false) "
+            "AS discontinuity "
+            "FROM marked ORDER BY date,id",
+            (trip_id,),
+        ).fetchall()
+    # Build exactly 600 equal-width time buckets.  A zero-duration source (all
+    # samples share a timestamp) is a valid stable sample set and belongs in
+    # bucket zero rather than causing a divide-by-zero error.
+    return database.execute(
+        "WITH bounds AS (SELECT min(date) AS start,max(date) AS ending FROM public.positions "
+        "WHERE drive_id=%s), samples AS ("
+        f"SELECT p.id,p.date,{value} AS value,"
+        "lag(p.date) OVER (ORDER BY p.date,p.id) AS previous_time,"
+        "CASE WHEN bounds.ending=bounds.start THEN 0 ELSE least(599,floor("
+        "extract(epoch FROM p.date-bounds.start)/"
+        "(extract(epoch FROM bounds.ending-bounds.start)/600))::integer) END AS bucket "
+        "FROM public.positions AS p CROSS JOIN bounds WHERE p.drive_id=%s), grouped AS ("
+        "SELECT bucket,min(date) AS time,max(date) AS last_time,avg(value) AS mean,"
+        "min(value) AS min,max(value) AS max,"
+        "(array_agg(value ORDER BY date DESC,id DESC) FILTER "
+        "(WHERE value IS NOT NULL))[1] AS value,"
+        "bool_or(value IS NULL OR date-previous_time > interval '5 minutes') "
+        "AS internal_discontinuity FROM samples GROUP BY bucket), marked AS "
+        "(SELECT *,lag(bucket) OVER (ORDER BY bucket) AS previous_bucket,"
+        "lag(last_time) OVER (ORDER BY bucket) AS previous_last_time FROM grouped) "
+        "SELECT time,mean,min,max,value,coalesce(internal_discontinuity OR "
+        "previous_bucket IS NOT NULL AND (bucket-previous_bucket > 1 OR "
+        "time-previous_last_time > interval '5 minutes'),false) "
+        "AS discontinuity "
+        "FROM marked ORDER BY time,bucket",
+        (trip_id, trip_id),
+    ).fetchall()
+
+
+@router.get("/trips/{trip_id}/series", response_model=TripSeries)
+def trip_series(request: Request, trip_id: int) -> TripSeries:
+    with connection(request) as database:
+        exists = database.execute(
+            "SELECT 1 FROM public.drives WHERE id=%s", (trip_id,)
+        ).fetchone()
+        if exists is None:
+            raise HTTPException(404, "Record not found")
+        statuses = capability_status(database)
+        reason = statuses["trip_series"]
+        capability = Capability(available=reason is None, reason=reason)
+        metadata = trip_series_metadata(database, trip_id)
+        samples = int(metadata["sample_count"])
+        values: list[TimeSeries] = []
+        for name, column, unit, aggregation, capability_name in TRIP_SERIES:
+            series_reason = statuses[capability_name]
+            series_capability = Capability(
+                available=series_reason is None, reason=series_reason
+            )
+            points = (
+                trip_series_points(database, trip_id, column, samples)
+                if series_reason is None
+                else []
+            )
+            values.append(
+                TimeSeries(
+                    name=name,
+                    unit=unit,
+                    start=metadata["start"],
+                    end=metadata["end"],
+                    sample_count=samples,
+                    bucket_count=len(points),
+                    aggregation="raw" if samples <= SERIES_BUCKET_LIMIT else aggregation,
+                    capability=series_capability,
+                    points=[SeriesPoint(**point) for point in points],
+                )
+            )
+    return TripSeries(trip_id=trip_id, capability=capability, series=values)
 
 
 @router.get("/trips/{trip_id}/trajectory", response_model=Trajectory)

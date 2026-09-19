@@ -577,6 +577,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/trips/{trip_id}/series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Trip Series */
+        get: operations["trip_series_api_v1_trips__trip_id__series_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/trips/{trip_id}/trajectory": {
         parameters: {
             query?: never;
@@ -1445,6 +1462,31 @@ export interface components {
              */
             delivery_accepted: boolean;
         };
+        /** @enum {string} */
+        SeriesAggregation: "raw" | "mean_min_max" | "last";
+        /** @enum {string} */
+        SeriesName: "speed" | "power" | "battery" | "inside_temperature" | "outside_temperature" | "elevation";
+        /**
+         * SeriesPoint
+         * @description One raw sample or one equal-width aggregate bucket.
+         */
+        SeriesPoint: {
+            /**
+             * Time
+             * Format: date-time
+             */
+            time: string;
+            /** Mean */
+            mean?: number | null;
+            /** Min */
+            min?: number | null;
+            /** Max */
+            max?: number | null;
+            /** Value */
+            value?: number | null;
+            /** Discontinuity */
+            discontinuity: boolean;
+        };
         /** SettingsResponse */
         SettingsResponse: {
             preferences?: components["schemas"]["PreferencesResponse"];
@@ -1459,6 +1501,24 @@ export interface components {
             csrf_token: string;
             /** Administrator Exists */
             administrator_exists: boolean;
+        };
+        /** TimeSeries */
+        TimeSeries: {
+            name: components["schemas"]["SeriesName"];
+            /** Unit */
+            unit: string;
+            /** Start */
+            start: string | null;
+            /** End */
+            end: string | null;
+            /** Sample Count */
+            sample_count: number;
+            /** Bucket Count */
+            bucket_count: number;
+            aggregation: components["schemas"]["SeriesAggregation"];
+            capability: components["schemas"]["Capability"];
+            /** Points */
+            points: components["schemas"]["SeriesPoint"][];
         };
         /** Trajectory */
         Trajectory: {
@@ -1553,6 +1613,14 @@ export interface components {
             estimated_energy_coverage: components["schemas"]["MetricCoverage"];
             estimated_average_consumption_coverage: components["schemas"]["MetricCoverage"];
             estimate_capability: components["schemas"]["Capability"];
+        };
+        /** TripSeries */
+        TripSeries: {
+            /** Trip Id */
+            trip_id: number;
+            capability: components["schemas"]["Capability"];
+            /** Series */
+            series: components["schemas"]["TimeSeries"][];
         };
         /** UserResponse */
         UserResponse: {
@@ -2511,6 +2579,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Charge"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trip_series_api_v1_trips__trip_id__series_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                trip_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TripSeries"];
                 };
             };
             /** @description Validation Error */

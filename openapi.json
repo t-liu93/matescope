@@ -1354,6 +1354,48 @@
         }
       }
     },
+    "/api/v1/trips/{trip_id}/series": {
+      "get": {
+        "tags": [
+          "history"
+        ],
+        "summary": "Trip Series",
+        "operationId": "trip_series_api_v1_trips__trip_id__series_get",
+        "parameters": [
+          {
+            "name": "trip_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Trip Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TripSeries"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/trips/{trip_id}/trajectory": {
       "get": {
         "tags": [
@@ -3149,6 +3191,89 @@
         ],
         "title": "SMTPTestResult"
       },
+      "SeriesAggregation": {
+        "type": "string",
+        "enum": [
+          "raw",
+          "mean_min_max",
+          "last"
+        ]
+      },
+      "SeriesName": {
+        "type": "string",
+        "enum": [
+          "speed",
+          "power",
+          "battery",
+          "inside_temperature",
+          "outside_temperature",
+          "elevation"
+        ]
+      },
+      "SeriesPoint": {
+        "properties": {
+          "time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Time"
+          },
+          "mean": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean"
+          },
+          "min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min"
+          },
+          "max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "discontinuity": {
+            "type": "boolean",
+            "title": "Discontinuity"
+          }
+        },
+        "type": "object",
+        "required": [
+          "time",
+          "discontinuity"
+        ],
+        "title": "SeriesPoint",
+        "description": "One raw sample or one equal-width aggregate bucket."
+      },
       "SettingsResponse": {
         "properties": {
           "preferences": {
@@ -3187,6 +3312,75 @@
           "administrator_exists"
         ],
         "title": "SetupStatus"
+      },
+      "TimeSeries": {
+        "properties": {
+          "name": {
+            "$ref": "#/components/schemas/SeriesName"
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "sample_count": {
+            "type": "integer",
+            "title": "Sample Count"
+          },
+          "bucket_count": {
+            "type": "integer",
+            "title": "Bucket Count"
+          },
+          "aggregation": {
+            "$ref": "#/components/schemas/SeriesAggregation"
+          },
+          "capability": {
+            "$ref": "#/components/schemas/Capability"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/SeriesPoint"
+            },
+            "type": "array",
+            "title": "Points"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "unit",
+          "start",
+          "end",
+          "sample_count",
+          "bucket_count",
+          "aggregation",
+          "capability",
+          "points"
+        ],
+        "title": "TimeSeries"
       },
       "Trajectory": {
         "properties": {
@@ -3511,6 +3705,31 @@
           "estimate_capability"
         ],
         "title": "TripPeriodSummary"
+      },
+      "TripSeries": {
+        "properties": {
+          "trip_id": {
+            "type": "integer",
+            "title": "Trip Id"
+          },
+          "capability": {
+            "$ref": "#/components/schemas/Capability"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/TimeSeries"
+            },
+            "type": "array",
+            "title": "Series"
+          }
+        },
+        "type": "object",
+        "required": [
+          "trip_id",
+          "capability",
+          "series"
+        ],
+        "title": "TripSeries"
       },
       "UserResponse": {
         "properties": {
