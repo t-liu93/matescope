@@ -1,0 +1,45 @@
+# M1-T33 only: invoke with an explicit unique --project-name.  This file owns no
+# default project and must never be used for ordinary development services.
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_DB: teslamate_synthetic
+      POSTGRES_USER: teslamate_admin
+      POSTGRES_PASSWORD: synthetic-only
+    ports:
+      - "127.0.0.1:${MATESCOPE_M1_T33_PG_PORT:?set an unused loopback port}:5432"
+    volumes:
+      - m1-t33-postgres:/var/lib/postgresql/data
+      - ./docker/postgres/001-synthetic.sql:/docker-entrypoint-initdb.d/001-synthetic.sql:ro
+      - ./scripts/m1_t33_guard.sql:/docker-entrypoint-initdb.d/002-m1-t33-guard.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U teslamate_admin -d teslamate_synthetic"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [m1-t33]
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      MATESCOPE_DATA_DIR: /app/data
+      MATESCOPE_PORT: 8000
+      MATESCOPE_PUBLIC_URL: http://127.0.0.1:${MATESCOPE_M1_T33_APP_PORT:?set an unused loopback port}
+      MATESCOPE_COOKIE_SECURE: "false"
+    ports:
+      - "127.0.0.1:${MATESCOPE_M1_T33_APP_PORT:?set an unused loopback port}:8000"
+    volumes:
+      - m1-t33-app-data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [m1-t33]
+
+volumes:
+  m1-t33-postgres:
+  m1-t33-app-data:
+
+networks:
+  m1-t33:
