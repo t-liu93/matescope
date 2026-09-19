@@ -290,6 +290,142 @@ def test_trip_places_and_soc_require_only_checked_optional_columns(
             admin.execute("DELETE FROM public.addresses WHERE id IN (-998,-999)")
 
 
+def test_charge_details_distinguish_recorded_values_permissions_and_vehicles(
+    client: TestClient, admin: psycopg.Connection[Any]
+) -> None:
+    """T14 never turns added energy into recorded use, free, or a location."""
+    legacy = client.get("/api/v1/charges/1")
+    assert legacy.status_code == 200
+    assert legacy.json()["energy_added_kwh"] == 22.5
+    assert {
+        key: legacy.json()[key]
+        for key in (
+            "place",
+            "start_battery_level",
+            "end_battery_level",
+            "recorded_energy_used_kwh",
+            "cost",
+        )
+    } == {
+        "place": None,
+        "start_battery_level": None,
+        "end_battery_level": None,
+        "recorded_energy_used_kwh": None,
+        "cost": None,
+    }
+    with optional_grants(admin):
+        original = admin.execute(
+            "SELECT address_id, geofence_id, start_battery_level, end_battery_level, "
+            "charge_energy_used, cost FROM public.charging_processes WHERE id=1"
+        ).fetchone()
+        unfinished = admin.execute(
+            "SELECT start_battery_level, end_battery_level, charge_energy_used, cost "
+            "FROM public.charging_processes WHERE id=4"
+        ).fetchone()
+        try:
+            # A blank geofence falls through to a complete road/house/city address.
+            admin.execute(
+                "INSERT INTO public.addresses (id,name,road,house_number,city) "
+                "VALUES (-997,NULL,'Charge Road','9','Charge City')"
+            )
+            admin.execute("INSERT INTO public.geofences (id,name) VALUES (-997,'  ')")
+            admin.execute(
+                "UPDATE public.charging_processes SET address_id=-997, geofence_id=-997, "
+                "start_battery_level=31, end_battery_level=79, "
+                "charge_energy_used=NULL, cost=NULL WHERE id=1"
+            )
+            charge = client.get("/api/v1/charges/1")
+            assert charge.status_code == 200, charge.text
+            assert {
+                key: charge.json()[key]
+                for key in (
+                    "place",
+                    "start_battery_level",
+                    "end_battery_level",
+                    "energy_added_kwh",
+                    "recorded_energy_used_kwh",
+                    "cost",
+                )
+            } == {
+                "place": "Charge Road 9, Charge City",
+                "start_battery_level": 31,
+                "end_battery_level": 79,
+                "energy_added_kwh": 22.5,
+                "recorded_energy_used_kwh": None,
+                "cost": None,
+            }
+
+            # Explicit zero is a real free charge, unlike a missing cost.  The
+            # record remains owned by vehicle 2 and cannot enter vehicle 1's page.
+            free = client.get("/api/v1/charges/3")
+            assert free.status_code == 200, free.text
+            assert free.json()["vehicle_id"] == 2
+            assert free.json()["recorded_energy_used_kwh"] == 13.5
+            assert free.json()["cost"] == 0
+            vehicle_one = client.get("/api/v1/charges", params={"vehicle_id": 1})
+            assert vehicle_one.status_code == 200, vehicle_one.text
+            assert 3 not in {item["id"] for item in vehicle_one.json()["items"]}
+
+            # Available source values on an unfinished process remain raw values;
+            # the API does not infer that this charge is complete.
+            admin.execute(
+                "UPDATE public.charging_processes SET start_battery_level=40, "
+                "end_battery_level=70, charge_energy_used=12.25, cost=0 WHERE id=4"
+            )
+            provisional = client.get("/api/v1/charges/4")
+            assert provisional.status_code == 200, provisional.text
+            assert provisional.json()["end"] is None
+            assert {
+                key: provisional.json()[key]
+                for key in (
+                    "start_battery_level",
+                    "end_battery_level",
+                    "recorded_energy_used_kwh",
+                    "cost",
+                )
+            } == {
+                "start_battery_level": 40,
+                "end_battery_level": 70,
+                "recorded_energy_used_kwh": 12.25,
+                "cost": 0,
+            }
+        finally:
+            admin.execute(
+                "UPDATE public.charging_processes SET address_id=%s, geofence_id=%s, "
+                "start_battery_level=%s, end_battery_level=%s, charge_energy_used=%s, cost=%s "
+                "WHERE id=1",
+                original,
+            )
+            admin.execute(
+                "UPDATE public.charging_processes SET start_battery_level=%s, "
+                "end_battery_level=%s, charge_energy_used=%s, cost=%s WHERE id=4",
+                unfinished,
+            )
+            admin.execute("DELETE FROM public.geofences WHERE id=-997")
+            admin.execute("DELETE FROM public.addresses WHERE id=-997")
+
+
+def test_charge_details_capability_reports_a_missing_optional_grant(
+    client: TestClient, admin: psycopg.Connection[Any]
+) -> None:
+    with optional_grants(admin):
+        with mutation(
+            admin,
+            "REVOKE SELECT (cost) ON public.charging_processes FROM matescope_readonly",
+            "GRANT SELECT (cost) ON public.charging_processes TO matescope_readonly",
+        ):
+            capabilities = client.get("/api/v1/history/capabilities").json()["capabilities"]
+            assert capabilities["charge_details"] == {
+                "available": False,
+                "reason": "insufficient_permissions",
+            }
+            charge = client.get("/api/v1/charges/3")
+            assert charge.status_code == 200, charge.text
+            assert charge.json()["energy_added_kwh"] == 15
+            assert charge.json()["recorded_energy_used_kwh"] is None
+            assert charge.json()["cost"] is None
+
+
 def test_history_capabilities_validate_all_added_columns(
     client: TestClient, admin: psycopg.Connection[Any]
 ) -> None:

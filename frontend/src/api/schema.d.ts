@@ -662,6 +662,16 @@ export interface components {
             duration_min: number | null;
             /** Energy Added Kwh */
             energy_added_kwh: number | null;
+            /** Place */
+            place: string | null;
+            /** Start Battery Level */
+            start_battery_level: number | null;
+            /** End Battery Level */
+            end_battery_level: number | null;
+            /** Recorded Energy Used Kwh */
+            recorded_energy_used_kwh: number | null;
+            /** Cost */
+            cost: number | null;
         };
         /** ChargePage */
         ChargePage: {

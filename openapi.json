@@ -1482,6 +1482,61 @@
               }
             ],
             "title": "Energy Added Kwh"
+          },
+          "place": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Place"
+          },
+          "start_battery_level": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Battery Level"
+          },
+          "end_battery_level": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Battery Level"
+          },
+          "recorded_energy_used_kwh": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recorded Energy Used Kwh"
+          },
+          "cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost"
           }
         },
         "type": "object",
@@ -1491,7 +1546,12 @@
           "start",
           "end",
           "duration_min",
-          "energy_added_kwh"
+          "energy_added_kwh",
+          "place",
+          "start_battery_level",
+          "end_battery_level",
+          "recorded_energy_used_kwh",
+          "cost"
         ],
         "title": "Charge"
       },

@@ -55,6 +55,11 @@ class Trip(Summary):
 
 class Charge(Summary):
     energy_added_kwh: float | None
+    place: str | None
+    start_battery_level: int | None
+    end_battery_level: int | None
+    recorded_energy_used_kwh: float | None
+    cost: float | None
 
 
 class TripPage(BaseModel):
@@ -354,8 +359,8 @@ TRIP_FIELDS = (
     "d.duration_min, d.distance AS distance_km, d.speed_max AS speed_max_kmh"
 )
 CHARGE_FIELDS = (
-    "id, car_id AS vehicle_id, start_date AS start, end_date AS end, "
-    "duration_min, charge_energy_added AS energy_added_kwh"
+    "c.id, c.car_id AS vehicle_id, c.start_date AS start, c.end_date AS end, "
+    "c.duration_min, c.charge_energy_added AS energy_added_kwh"
 )
 
 
@@ -431,6 +436,58 @@ def trip_projection(
     return ", ".join(fields), " ".join(joins)
 
 
+def charge_projection(
+    capabilities: dict[str, CapabilityReason | None],
+) -> tuple[str, str]:
+    """Build charge additions only after their column grants are diagnosed."""
+    fields = [CHARGE_FIELDS]
+    joins: list[str] = []
+    has_details = capabilities["charge_details"] is None
+    has_locations = capabilities["locations"] is None
+
+    if has_details:
+        fields.extend(
+            [
+                "c.start_battery_level",
+                "c.end_battery_level",
+                "c.charge_energy_used AS recorded_energy_used_kwh",
+                "c.cost",
+            ]
+        )
+    else:
+        fields.extend(
+            [
+                "NULL::smallint AS start_battery_level",
+                "NULL::smallint AS end_battery_level",
+                "NULL::numeric AS recorded_energy_used_kwh",
+                "NULL::numeric AS cost",
+            ]
+        )
+
+    if has_details and has_locations:
+        joins.extend(
+            [
+                "LEFT JOIN public.geofences AS charge_geofence "
+                "ON charge_geofence.id=c.geofence_id",
+                "LEFT JOIN public.addresses AS charge_address "
+                "ON charge_address.id=c.address_id",
+            ]
+        )
+        fields.append(
+            "COALESCE(NULLIF(btrim(charge_geofence.name), ''), "
+            "NULLIF(btrim(charge_address.name), ''), "
+            "CASE WHEN NULLIF(concat_ws(' ', NULLIF(btrim(charge_address.road), ''), "
+            "NULLIF(btrim(charge_address.house_number), '')), '') IS NOT NULL "
+            "AND NULLIF(btrim(charge_address.city), '') IS NOT NULL THEN concat_ws(', ', "
+            "concat_ws(' ', NULLIF(btrim(charge_address.road), ''), "
+            "NULLIF(btrim(charge_address.house_number), '')), btrim(charge_address.city)) END) "
+            "AS place"
+        )
+    else:
+        fields.append("NULL::text AS place")
+    return ", ".join(fields), " ".join(joins)
+
+
 def page(
     request: Request,
     window: Window,
@@ -446,7 +503,7 @@ def page(
             CHARGE_FIELDS,
         )
     )
-    prefix = "d." if kind == "trips" else ""
+    prefix = "d." if kind == "trips" else "c."
     conditions = [sql.SQL(f"{prefix}start_date >= %s AND {prefix}start_date < %s")]
     params: list[object] = [window.start, window.end]
     if window.vehicle_id is not None:
@@ -460,13 +517,15 @@ def page(
         joins = ""
         if kind == "trips":
             fields, joins = trip_projection(capability_status(database))
+        else:
+            fields, joins = charge_projection(capability_status(database))
         rows = database.execute(
             sql.SQL(
                 "SELECT {} FROM public.{}{} WHERE {} ORDER BY {}start_date DESC, {}id DESC LIMIT %s"
             ).format(
                 sql.SQL(fields),
                 sql.Identifier(table),
-                sql.SQL(" AS d " + joins if kind == "trips" else ""),
+                sql.SQL((" AS d " if kind == "trips" else " AS c ") + joins),
                 sql.SQL(" AND ").join(conditions),
                 sql.SQL(prefix),
                 sql.SQL(prefix),
@@ -502,12 +561,14 @@ def detail(request: Request, identifier: int, kind: Literal["trips", "charges"])
         joins = ""
         if kind == "trips":
             fields, joins = trip_projection(capability_status(database))
+        else:
+            fields, joins = charge_projection(capability_status(database))
         row = database.execute(
             sql.SQL("SELECT {} FROM public.{}{} WHERE {}id=%s").format(
                 sql.SQL(fields),
                 sql.Identifier(table),
-                sql.SQL(" AS d " + joins if kind == "trips" else ""),
-                sql.SQL("d." if kind == "trips" else ""),
+                sql.SQL((" AS d " if kind == "trips" else " AS c ") + joins),
+                sql.SQL("d." if kind == "trips" else "c."),
             ),
             (identifier,),
         ).fetchone()
