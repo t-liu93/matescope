@@ -80,6 +80,12 @@ function whole(value: number | null | undefined) {
   return <span className="metric-value">{Math.round(value).toLocaleString()}</span>;
 }
 
+function signedWhole(value: number | null | undefined) {
+  if (value == null) return <span className="metric-value metric-value-empty">—</span>;
+  const rounded = Math.round(value);
+  return <span className="metric-value">{rounded > 0 ? `+${rounded}` : rounded.toLocaleString()}</span>;
+}
+
 function duration(value: number | null | undefined) {
   if (value == null) return <span className="metric-value metric-value-empty">—</span>;
   const minutes = Math.round(value);
@@ -400,14 +406,9 @@ function TripRows({ items, timezone, historyPath, listPath }: { items: Trip[]; t
   </Fragment>)}</Stack>;
 }
 
-export function DetailValues({ item, kind, timezone, rangeBasis }: { item: Trip | Charge; kind: "trips" | "charges"; timezone: string; rangeBasis: "rated" | "ideal" }) {
+export function DetailValues({ item, kind, timezone, rangeBasis, currency = null }: { item: Trip | Charge; kind: "trips" | "charges"; timezone: string; rangeBasis: "rated" | "ideal"; currency?: string | null }) {
   const { t } = useTranslation();
-  if (kind === "charges") return <SimpleGrid cols={{ base: 1, sm: 2 }}>
-    <Text>{t("start")}: {formatDate(item.start, timezone)}</Text>
-    <Text>{t("end")}: {item.end ? formatDate(item.end, timezone) : t("unfinished")}</Text>
-    <Text>{t("duration")}: {duration(item.duration_min)}</Text>
-    <Text>{t("energyAdded")}: {value((item as Charge).energy_added_kwh, "kWh")}</Text>
-  </SimpleGrid>;
+  if (kind === "charges") return <ChargeDetailValues item={item as Charge} timezone={timezone} currency={currency} />;
   const trip = item as Trip;
   return <Stack gap="sm">
     <Group justify="space-between" align="start" wrap="wrap">
@@ -424,6 +425,28 @@ export function DetailValues({ item, kind, timezone, rangeBasis }: { item: Trip 
         <Text component="span">{t("estimatedEnergy")}: {value(trip.estimated_energy_kwh, "kWh")} <Badge size="xs" variant="light">{t("estimated")}</Badge></Text>
         <Text size="xs" c="dimmed">{t("estimatedEnergyBasis", { basis: t(`rangeBasis_${rangeBasis}`) })}</Text>
       </div>
+    </SimpleGrid>
+  </Stack>;
+}
+
+export function ChargeDetailValues({ item, timezone, currency = null }: { item: Charge; timezone: string; currency?: string | null }) {
+  const { t } = useTranslation();
+  const socChange = item.start_battery_level != null && item.end_battery_level != null
+    ? item.end_battery_level - item.start_battery_level
+    : null;
+  const ended = item.end !== null;
+  return <Stack gap="sm" className="charge-detail-values">
+    <Text className="charge-detail-place"><span className="detail-label">{t("location")}</span> {item.place ?? t("unknownLocation")}</Text>
+    {!ended && <Alert color="yellow" role="status">{t("provisionalCharge")}</Alert>}
+    <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
+      <Text><span className="detail-label">{t("start")}</span> {formatDate(item.start, timezone)}</Text>
+      <Text><span className="detail-label">{t("end")}</span> {ended ? formatDate(item.end, timezone) : t("recordNotEnded")}</Text>
+      <Text><span className="detail-label">{t("duration")}</span> {ended ? duration(item.duration_min) : t("provisional")}</Text>
+      <Text><span className="detail-label">{t("soc")}</span> {whole(item.start_battery_level)} → {whole(item.end_battery_level)}</Text>
+      <Text><span className="detail-label">{t("socChange")}</span> {signedWhole(socChange)}%</Text>
+      <Text><span className="detail-label">{t("energyAdded")}</span> {value(item.energy_added_kwh, "kWh")}</Text>
+      <Text><span className="detail-label">{t("recordedEnergyUsed")}</span> {value(item.recorded_energy_used_kwh, "kWh")}</Text>
+      <Text><span className="detail-label">{t("recordedCost")}</span> {cost(item.cost, currency, t)} {!currency && <span className="currency-unconfigured">{t("currencyNotConfigured")}</span>}</Text>
     </SimpleGrid>
   </Stack>;
 }
@@ -509,7 +532,7 @@ function HistoryDetail({ kind }: { kind: "trips" | "charges" }) {
     </Group>
     <Text size="sm" c="dimmed">{t("timesShownIn", { timezone })}</Text>
     <div className={kind === "trips" ? "trip-detail-layout" : undefined}>
-      <Card withBorder radius="md"><Stack gap="sm"><Title order={2}>{t("summary")}</Title><DetailValues item={item} kind={kind} timezone={timezone} rangeBasis={rangeBasis} /></Stack></Card>
+      <Card withBorder radius="md"><Stack gap="sm"><Title order={2}>{t("summary")}</Title><DetailValues item={item} kind={kind} timezone={timezone} rangeBasis={rangeBasis} currency={settings.data.preferences.display_currency ?? null} /></Stack></Card>
       {kind === "trips" && <Card key={identifier} withBorder radius="md"><Stack><Title order={2}>{t("route")}</Title>
       {trajectory.isPending && <Text>{t("loadingMap")}</Text>}
       {(trajectory.error || mapModuleFailed || tileFailed) && <Alert color="yellow">{t("mapUnavailable")}</Alert>}

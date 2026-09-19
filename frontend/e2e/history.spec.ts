@@ -130,6 +130,7 @@ type MockOptions = {
   chargeSummaryResponse?: Record<string, unknown>;
   displayCurrency?: "EUR";
   chargeItems?: Record<string, unknown>[];
+  chargeDetails?: Record<string, Record<string, unknown>>;
 };
 async function mockHistoryApi(page: Page, options: MockOptions = {}) {
   const lists: URL[] = [];
@@ -210,7 +211,10 @@ async function mockHistoryApi(page: Page, options: MockOptions = {}) {
     }
     if (/\/trips\/1$/.test(path)) return route.fulfill({ json: { id: 1, vehicle_id: 1, start: "2026-03-29T00:30:00Z", end: "2026-03-29T01:30:00Z", duration_min: 60, distance_km: 12.5, speed_max_kmh: 72, start_place: "SYNTHETIC Starting Place", end_place: "SYNTHETIC Destination Place", start_battery_level: 82, end_battery_level: 68, estimated_energy_kwh: 2.4, estimated_average_consumption_wh_per_km: 192 } });
     if (/\/trips\/2$/.test(path)) return route.fulfill({ json: { id: 2, vehicle_id: 2, start: "2026-03-30T00:30:00Z", end: "2026-03-30T01:30:00Z", duration_min: 60, distance_km: 22, speed_max_kmh: 72, start_place: "SYNTHETIC Boreal Start", end_place: "SYNTHETIC Boreal End", start_battery_level: 77, end_battery_level: 60, estimated_energy_kwh: 4.1, estimated_average_consumption_wh_per_km: 186 } });
-    if (/\/charges\/1$/.test(path)) return route.fulfill({ json: { id: 1, vehicle_id: 1, start: "2026-09-12T20:00:00Z", end: "2026-09-12T20:45:00Z", duration_min: 45, energy_added_kwh: 22.5 } });
+    if (/\/charges\/\d+$/.test(path)) {
+      const id = path.split("/").at(-1)!;
+      return route.fulfill({ json: options.chargeDetails?.[id] ?? { id: Number(id), vehicle_id: 1, start: "2026-09-12T20:00:00Z", end: "2026-09-12T20:45:00Z", duration_min: 45, energy_added_kwh: 22.5 } });
+    }
     if (path.endsWith("/trips/1/series")) {
       if (options.tripSeriesFailure) return route.fulfill({ status: 503, json: { detail: "unavailable" } });
       return route.fulfill({ json: {
@@ -738,6 +742,63 @@ test.describe("T19 compact charge list", () => {
     await expect(summary.getByText("This metric is unavailable.", { exact: true })).toBeVisible();
     await expect(page.locator(".charge-place")).toHaveCSS("text-overflow", "ellipsis");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  });
+});
+
+test.describe("T28 charge detail summary", () => {
+  test("covers ended detail values, configured zero cost, and scoped Back/Forward restoration", async ({ page }) => {
+    const listUrl = "/charges?vehicle=1&start=2026-09-01T00%3A00%3A00Z&end=2026-10-01T00%3A00%3A00Z";
+    await mockHistoryApi(page, {
+      displayCurrency: "EUR",
+      chargeDetails: {
+        "1": {
+          id: 1, vehicle_id: 1, start: "2026-09-12T20:00:00Z", end: "2026-09-12T20:45:00Z", duration_min: 45,
+          place: "SYNTHETIC Charge Location", start_battery_level: 20, end_battery_level: 60,
+          energy_added_kwh: 22.5, recorded_energy_used_kwh: 18.1, cost: 0,
+        },
+      },
+    });
+    await page.goto(listUrl);
+    await page.locator('a[href^="/charges/1"]').click();
+    await expect(page).toHaveURL(/\/charges\/1\?vehicle=1.*start=2026-09-01T00/);
+    await expect(page.getByText(/Location SYNTHETIC Charge Location/)).toBeVisible();
+    await expect(page.getByText(/20.*→.*60/)).toBeVisible();
+    await expect(page.getByText(/SOC change.*40/)).toBeVisible();
+    await expect(page.getByText(/22\.5\s*kWh/)).toBeVisible();
+    await expect(page.getByText(/18\.1\s*kWh/)).toBeVisible();
+    await expect(page.getByText(/€0\.00/)).toBeVisible();
+    await expect(page.getByText(/Atlas.*#1/)).toBeVisible();
+
+    await page.getByRole("button", { name: "Back to charges", exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`${listUrl.replace(/[?]/g, "\\?").replace(/[.]/g, "\\.")}$`));
+    await expect(page.getByText("SYNTHETIC Supercharger", { exact: true }).first()).toBeVisible();
+    await page.goForward();
+    await expect(page).toHaveURL(/\/charges\/1\?vehicle=1.*start=2026-09-01T00/);
+    await expect(page.getByText(/SOC change.*40/)).toBeVisible();
+  });
+
+  test("covers direct provisional detail with null values, unset currency, owner resolution, and phone overflow", async ({ page }, testInfo) => {
+    await mockHistoryApi(page, {
+      chargeDetails: {
+        "2": {
+          id: 2, vehicle_id: 1, start: "2026-09-13T20:00:00Z", end: null, duration_min: null,
+          place: "SYNTHETIC Long Provisional Charging Location", start_battery_level: 35, end_battery_level: null,
+          energy_added_kwh: 5.5, recorded_energy_used_kwh: null, cost: null,
+        },
+      },
+    });
+    await page.goto("/charges/2?vehicle=2&start=2026-09-01T00%3A00%3A00Z&end=2026-10-01T00%3A00%3A00Z");
+    await expect(page.getByText(/Location SYNTHETIC Long Provisional Charging Location/)).toBeVisible();
+    await expect(page.getByText(/Atlas.*#1/)).toBeVisible();
+    await expect(page.getByRole("status").getByText("Provisional charge: record not ended.", { exact: true })).toBeVisible();
+    await expect(page.getByText(/End Record not ended/)).toBeVisible();
+    await expect(page.getByText(/Duration Provisional/)).toBeVisible();
+    await expect(page.getByText(/5\.5\s*kWh/)).toBeVisible();
+    await expect(page.getByText("Unknown", { exact: true })).toBeVisible();
+    await expect(page.getByText("Currency not configured", { exact: true })).toBeVisible();
+    if (testInfo.project.name === "mobile") {
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    }
   });
 });
 

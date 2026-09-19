@@ -86,6 +86,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .trip-place { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .charge-list-card { min-width: 0; }
 .charge-place { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.charge-detail-place { min-width: 0; overflow-wrap: anywhere; }
+.charge-detail-values { min-width: 0; }
 .currency-unconfigured { color: var(--mantine-color-dimmed); font-size: var(--mantine-font-size-xs); }
 .shell-header { padding-inline: 8px; }
 .shell-header-actions .mantine-Button-root { min-height: 44px; padding-inline: 8px; }

@@ -2,7 +2,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { MantineProvider } from "@mantine/core";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { DetailValues, MetricCoverage, TripMoreData } from "./history";
+import { ChargeDetailValues, DetailValues, MetricCoverage, TripMoreData } from "./history";
 import type { components } from "./api/schema";
 import i18n from "./i18n";
 
@@ -69,6 +69,39 @@ describe("Trip detail summary", () => {
     expect(screen.getByText("A very long destination place", { exact: false })).toBeVisible();
     expect(screen.getByText("Estimated", { exact: true })).toBeVisible();
     expect(screen.getByText("Based on ideal range", { exact: true })).toBeVisible();
+  });
+});
+
+describe("Charge detail summary", () => {
+  const charge: components["schemas"]["Charge"] = {
+    id: 8,
+    vehicle_id: 4,
+    start: "2026-01-30T08:00:00Z",
+    end: "2026-01-30T09:30:00Z",
+    duration_min: 90,
+    place: "A very long charging location with a complete address",
+    start_battery_level: 25,
+    end_battery_level: 80,
+    energy_added_kwh: 42.5,
+    recorded_energy_used_kwh: null,
+    cost: 0,
+  };
+
+  it("keeps added and recorded energy distinct and shows a known zero cost", () => {
+    render(<MantineProvider><ChargeDetailValues item={charge} timezone="UTC" currency="EUR" /></MantineProvider>);
+    expect(screen.getByText("A very long charging location with a complete address", { exact: false })).toBeVisible();
+    expect(screen.getByText("Recorded energy used", { exact: false })).toBeVisible();
+    expect(screen.getByText("SOC change", { exact: false })).toBeVisible();
+    expect(screen.getByText(/0\.00/)).toBeVisible();
+    expect(screen.queryByText("Currency not configured", { exact: true })).toBeNull();
+  });
+
+  it("labels unfinished records provisional and retains raw cost when currency is unset", () => {
+    render(<MantineProvider><ChargeDetailValues item={{ ...charge, end: null, duration_min: null, cost: 3.5 }} timezone="UTC" /></MantineProvider>);
+    expect(screen.getByText("Provisional charge: record not ended.", { exact: true })).toBeVisible();
+    expect(screen.getByText("Record not ended", { exact: true })).toBeVisible();
+    expect(screen.getByText("Currency not configured", { exact: true })).toBeVisible();
+    expect(screen.getByText(/3\.50/)).toBeVisible();
   });
 });
 
