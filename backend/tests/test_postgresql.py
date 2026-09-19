@@ -93,23 +93,136 @@ def mutation(admin: psycopg.Connection[Any], change: str, undo: str) -> Iterator
         admin.execute(undo)
 
 
+def has_column_select_permission(
+    admin: psycopg.Connection[Any], table: str, column: str
+) -> bool:
+    return admin.execute(
+        "SELECT has_column_privilege(%s, %s, %s, 'SELECT')",
+        ("matescope_readonly", f"public.{table}", column),
+    ).fetchone()[0]
+
+
+@contextmanager
+def column_select_grant(
+    admin: psycopg.Connection[Any], table: str, column: str
+) -> Iterator[None]:
+    """Temporarily supply one SELECT permission without changing its prior state."""
+    original = has_column_select_permission(admin, table, column)
+    added = False
+    try:
+        if not original:
+            admin.execute(f"GRANT SELECT ({column}) ON public.{table} TO matescope_readonly")
+            added = True
+        yield
+    finally:
+        if added:
+            admin.execute(f"REVOKE SELECT ({column}) ON public.{table} FROM matescope_readonly")
+        assert has_column_select_permission(admin, table, column) == original, (
+            f"column SELECT state was not restored for public.{table}.{column}"
+        )
+
+
 @contextmanager
 def optional_grants(admin: psycopg.Connection[Any]) -> Iterator[None]:
     columns: dict[str, set[str]] = {}
     for group in CAPABILITY_COLUMNS.values():
         for table, required in group.items():
             columns.setdefault(table, set()).update(required)
-    statements = [
-        f"SELECT ({','.join(sorted(required))}) ON public.{table}"
+    original = {
+        (table, column): admin.execute(
+            "SELECT has_column_privilege(%s, %s, %s, 'SELECT')",
+            ("matescope_readonly", f"public.{table}", column),
+        ).fetchone()[0]
         for table, required in columns.items()
-    ]
+        for column in required
+    }
+    added: dict[str, set[str]] = {}
     try:
-        for statement in statements:
-            admin.execute(f"GRANT {statement} TO matescope_readonly")
+        for table, required in columns.items():
+            missing = sorted(column for column in required if not original[(table, column)])
+            if missing:
+                admin.execute(
+                    f"GRANT SELECT ({','.join(missing)}) ON public.{table} TO matescope_readonly"
+                )
+                added[table] = set(missing)
         yield
     finally:
-        for statement in statements:
-            admin.execute(f"REVOKE {statement} FROM matescope_readonly")
+        for table, granted in added.items():
+            admin.execute(
+                f"REVOKE SELECT ({','.join(sorted(granted))}) ON public.{table} "
+                "FROM matescope_readonly"
+            )
+        for (table, column), expected in original.items():
+            assert (
+                admin.execute(
+                    "SELECT has_column_privilege(%s, %s, %s, 'SELECT')",
+                    ("matescope_readonly", f"public.{table}", column),
+                ).fetchone()[0]
+                == expected
+            ), f"optional grant state was not restored for public.{table}.{column}"
+
+
+@contextmanager
+def trip_summary_fixture(admin: psycopg.Connection[Any]) -> Iterator[None]:
+    """Create and precisely remove the rows used by the T16 aggregate test."""
+    car_id = 97
+    drive_ids = (9601, 9602, 9603, 9604, 9605, 9606)
+    created_car = False
+    created_drives = False
+    original_cars: list[Any] = []
+    original_drives: list[Any] = []
+    try:
+        original_cars = admin.execute(
+            "SELECT * FROM public.cars WHERE id=%s", (car_id,)
+        ).fetchall()
+        original_drives = admin.execute(
+            "SELECT * FROM public.drives WHERE id = ANY(%s) ORDER BY id", (list(drive_ids),)
+        ).fetchall()
+        assert not original_cars and not original_drives, (
+            "T16 fixture identifiers must be unused"
+        )
+
+        admin.execute(
+            "INSERT INTO public.cars (id,name,model,efficiency) VALUES (97,'SUMMARY',NULL,0.18)"
+        )
+        created_car = True
+        admin.execute(
+            "INSERT INTO public.drives "
+            "(id,car_id,start_date,end_date,distance,duration_min,speed_max,"
+            "start_rated_range_km,end_rated_range_km,start_ideal_range_km,"
+            "end_ideal_range_km) VALUES "
+            "(9601,97,TIMESTAMP '2025-01-01 00:00:00',"
+            "TIMESTAMP '2025-01-01 00:30:00',10,30,1,100,90,100,80),"
+            "(9602,97,TIMESTAMP '2025-01-02 00:00:00',"
+            "TIMESTAMP '2025-01-02 01:00:00',20,60,1,100,100,100,100),"
+            "(9603,97,TIMESTAMP '2025-01-03 00:00:00',"
+            "TIMESTAMP '2025-01-03 00:10:00',-2,-4,1,100,90,100,80),"
+            "(9604,97,TIMESTAMP '2025-01-04 00:00:00',NULL,8,20,1,100,90,100,80),"
+            "(9605,97,TIMESTAMP '2025-01-05 00:00:00',"
+            "TIMESTAMP '2025-01-05 00:10:00',NULL,NULL,1,NULL,NULL,NULL,NULL),"
+            "(9606,97,TIMESTAMP '2025-02-01 00:00:00',"
+            "TIMESTAMP '2025-02-01 00:10:00',99,99,1,100,90,100,80)"
+        )
+        created_drives = True
+        yield
+    finally:
+        if created_drives:
+            deleted_drives = admin.execute(
+                "DELETE FROM public.drives WHERE car_id=%s AND id = ANY(%s) RETURNING id",
+                (car_id, list(drive_ids)),
+            ).fetchall()
+            assert {row[0] for row in deleted_drives} == set(drive_ids)
+        if created_car:
+            deleted_cars = admin.execute(
+                "DELETE FROM public.cars WHERE id=%s RETURNING id", (car_id,)
+            ).fetchall()
+            assert deleted_cars == [(car_id,)]
+        assert admin.execute(
+            "SELECT * FROM public.cars WHERE id=%s", (car_id,)
+        ).fetchall() == original_cars
+        assert admin.execute(
+            "SELECT * FROM public.drives WHERE id = ANY(%s) ORDER BY id", (list(drive_ids),)
+        ).fetchall() == original_drives
 
 
 def test_synthetic_sql_and_readonly(client: TestClient, pgconfig: PostgreSQLResponse) -> None:
@@ -130,6 +243,20 @@ def test_synthetic_sql_and_readonly(client: TestClient, pgconfig: PostgreSQLResp
             assert source.pool is not None and source.pool.max_size == 3
             with pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
                 connection.execute("UPDATE public.drives SET distance=1 WHERE id=1")
+    finally:
+        source.close()
+
+
+def test_source_timeout_is_classified_not_returned_as_partial_data(
+    pgconfig: PostgreSQLResponse,
+) -> None:
+    """The retained five-second source deadline must remain an explicit failure."""
+    source = DataSource()
+    try:
+        with source.connection(pgconfig, "synthetic-reader-only") as connection:
+            with pytest.raises(psycopg.errors.QueryCanceled) as error:
+                connection.execute("SELECT pg_sleep(6)")
+        assert classify(error.value) == "timeout"
     finally:
         source.close()
 
@@ -373,6 +500,171 @@ def test_trip_estimated_energy_uses_saved_basis_and_excludes_invalid_inputs(
                 "end_rated_range_km=%s WHERE id=3",
                 original_three,
             )
+
+
+def test_trip_period_summary_aggregates_full_window_and_reports_coverage(
+    client: TestClient, admin: psycopg.Connection[Any]
+) -> None:
+    """T16 keeps unfinished/invalid rows out of totals and one common energy denominator."""
+    params = {
+        "start": "2025-01-01T00:00:00Z",
+        "end": "2025-02-01T00:00:00Z",
+    }
+    with trip_summary_fixture(admin):
+        legacy = client.get("/api/v1/vehicles/97/trip-summary", params=params)
+        assert legacy.status_code == 200, legacy.text
+        assert legacy.json()["estimate_capability"] == {
+            "available": False,
+            "reason": "insufficient_permissions",
+        }
+        assert legacy.json()["distance_km"] == 30
+        assert legacy.json()["estimated_energy_kwh"] is None
+
+        with optional_grants(admin):
+            response = client.get("/api/v1/vehicles/97/trip-summary", params=params)
+            assert response.status_code == 200, response.text
+            result = response.json()
+            assert {
+                key: result[key]
+                for key in (
+                    "total_count",
+                    "ended_count",
+                    "not_ended_count",
+                    "distance_km",
+                    "duration_min",
+                    "estimated_energy_kwh",
+                    "estimated_average_consumption_wh_per_km",
+                )
+            } == {
+                "total_count": 5,
+                "ended_count": 4,
+                "not_ended_count": 1,
+                "distance_km": 30,
+                "duration_min": 90,
+                "estimated_energy_kwh": pytest.approx(1.8),
+                # This is 1.8 kWh / the same 30 km eligible records, not the
+                # average of 180 and 0 Wh/km per-trip averages.
+                "estimated_average_consumption_wh_per_km": pytest.approx(60),
+            }
+            assert result["estimate_capability"] == {"available": True, "reason": None}
+            assert result["distance_coverage"] == {
+                "applicable_count": 4,
+                "valid_count": 2,
+                "reason": None,
+            }
+            assert result["duration_coverage"] == result["distance_coverage"]
+            assert result["estimated_energy_coverage"] == {
+                "applicable_count": 4,
+                "valid_count": 2,
+                "reason": None,
+            }
+
+            save(client, "preferences", {"range_basis": "ideal"})
+            ideal = client.get("/api/v1/vehicles/97/trip-summary", params=params).json()
+            assert ideal["estimated_energy_kwh"] == pytest.approx(3.6)
+            save(client, "preferences", {"range_basis": "rated"})
+
+            empty = client.get(
+                "/api/v1/vehicles/97/trip-summary",
+                params={"start": "2024-01-01T00:00:00Z", "end": "2024-02-01T00:00:00Z"},
+            ).json()
+            assert empty["total_count"] == empty["ended_count"] == empty["not_ended_count"] == 0
+            empty_totals = (
+                "distance_km",
+                "duration_min",
+                "estimated_energy_kwh",
+                "estimated_average_consumption_wh_per_km",
+            )
+            assert all(empty[key] == 0 for key in empty_totals)
+            assert all(
+                value["reason"] is None
+                for key, value in empty.items()
+                if key.endswith("_coverage")
+            )
+
+            missing = client.get(
+                "/api/v1/vehicles/97/trip-summary",
+                params={"start": "2025-01-05T00:00:00Z", "end": "2025-01-06T00:00:00Z"},
+            ).json()
+            assert missing["distance_km"] is None
+            assert missing["distance_coverage"] == {
+                "applicable_count": 1,
+                "valid_count": 0,
+                "reason": "no_valid_values",
+            }
+
+            unfinished = client.get(
+                "/api/v1/vehicles/97/trip-summary",
+                params={"start": "2025-01-04T00:00:00Z", "end": "2025-01-05T00:00:00Z"},
+            ).json()
+            assert unfinished["distance_km"] is None
+            assert unfinished["distance_coverage"] == {
+                "applicable_count": 0,
+                "valid_count": 0,
+                "reason": "no_ended_records",
+            }
+            other_vehicle = client.get("/api/v1/vehicles/1/trip-summary", params=params).json()
+            assert other_vehicle["total_count"] == 0
+
+
+def test_optional_grants_preserves_existing_column_permissions(
+    admin: psycopg.Connection[Any],
+) -> None:
+    """A pre-existing optional grant must survive the shared test helper."""
+    with column_select_grant(admin, "cars", "efficiency"):
+        assert has_column_select_permission(admin, "cars", "efficiency")
+        with optional_grants(admin):
+            pass
+        assert has_column_select_permission(admin, "cars", "efficiency")
+
+
+def test_trip_summary_fixture_refuses_existing_rows(admin: psycopg.Connection[Any]) -> None:
+    """A setup collision fails before mutation and leaves retained data untouched."""
+    with mutation(
+        admin,
+        "INSERT INTO public.cars (id,name,model,efficiency) VALUES (97,'RETAINED',NULL,NULL)",
+        "DELETE FROM public.cars WHERE id=97",
+    ):
+        with pytest.raises(AssertionError, match="fixture identifiers must be unused"):
+            with trip_summary_fixture(admin):
+                pass
+        retained = admin.execute("SELECT name FROM public.cars WHERE id=97").fetchone()
+        assert retained == ("RETAINED",)
+        assert (
+            admin.execute("SELECT count(*) FROM public.drives WHERE car_id=97").fetchone()[0] == 0
+        )
+
+
+def test_trip_summary_fixture_cleans_up_after_setup_interruption(
+    admin: psycopg.Connection[Any],
+) -> None:
+    """A failed drive insert still removes the car created earlier in setup."""
+    with mutation(
+        admin,
+        "ALTER TABLE public.drives ADD CONSTRAINT t16_fixture_setup_interrupt CHECK (id <> 9601)",
+        "ALTER TABLE public.drives DROP CONSTRAINT t16_fixture_setup_interrupt",
+    ):
+        with pytest.raises(psycopg.errors.CheckViolation):
+            with trip_summary_fixture(admin):
+                pass
+        assert admin.execute("SELECT count(*) FROM public.cars WHERE id=97").fetchone()[0] == 0
+        assert (
+            admin.execute("SELECT count(*) FROM public.drives WHERE car_id=97").fetchone()[0] == 0
+        )
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"start": "2025-01-01T00:00:00Z", "end": "2025-01-01T00:00:00Z"},
+        {"start": "2025-01-02T00:00:00Z", "end": "2025-01-01T00:00:00Z"},
+        {"start": "2025-01-01T00:00:00", "end": "2025-01-02T00:00:00Z"},
+    ],
+)
+def test_trip_period_summary_rejects_invalid_windows(
+    client: TestClient, params: dict[str, str]
+) -> None:
+    assert client.get("/api/v1/vehicles/1/trip-summary", params=params).status_code == 422
 
 
 def test_charge_details_distinguish_recorded_values_permissions_and_vehicles(

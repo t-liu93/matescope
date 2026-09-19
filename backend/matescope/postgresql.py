@@ -52,6 +52,18 @@ CAPABILITY_COLUMNS: dict[str, dict[str, tuple[str, ...]]] = {
         # trip-detail capability so a legacy reader never reaches this column.
         "positions": ("battery_level",),
     },
+    # T16 uses the same optional source columns as the per-trip estimate, but
+    # exposes its availability independently because base period totals remain
+    # useful to a legacy minimal reader.
+    "trip_summary": {
+        "cars": ("efficiency",),
+        "drives": (
+            "start_rated_range_km",
+            "end_rated_range_km",
+            "start_ideal_range_km",
+            "end_ideal_range_km",
+        ),
+    },
     "charge_details": {
         "charging_processes": (
             "address_id",

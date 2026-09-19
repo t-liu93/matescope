@@ -78,6 +78,14 @@ class ChargePage(BaseModel):
     end: datetime
 
 
+class MetricCoverage(BaseModel):
+    """Validity of one period aggregate; applicability is every ended drive."""
+
+    applicable_count: int
+    valid_count: int
+    reason: Literal["no_ended_records", "no_valid_values", "zero_denominator", "unavailable"] | None
+
+
 class Point(BaseModel):
     id: int
     time: datetime
@@ -107,6 +115,29 @@ class Diagnostics(BaseModel):
 class Capability(BaseModel):
     available: bool
     reason: CapabilityReason | None = None
+
+
+class TripPeriodSummary(BaseModel):
+    vehicle_id: int
+    start: datetime
+    end: datetime
+    total_count: int
+    ended_count: int
+    not_ended_count: int
+    distance_km: float | None
+    duration_min: float | None
+    estimated_energy_kwh: float | None
+    estimated_average_consumption_wh_per_km: float | None
+    distance_coverage: MetricCoverage
+    duration_coverage: MetricCoverage
+    estimated_energy_coverage: MetricCoverage
+    estimated_average_consumption_coverage: MetricCoverage
+    estimate_capability: Capability
+
+    @field_validator("start", "end")
+    @classmethod
+    def utc(cls, value: datetime) -> datetime:
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value
 
 
 class HistoryCapabilities(BaseModel):
@@ -354,6 +385,175 @@ class Window:
                 }
             ).encode()
         ).decode()
+
+
+def period_window(start: datetime, end: datetime) -> tuple[datetime, datetime]:
+    """Validate an explicit UTC interval for a non-paginated period aggregate."""
+    try:
+        if start.tzinfo is None or end.tzinfo is None:
+            raise ValueError
+        start, end = start.astimezone(UTC), end.astimezone(UTC)
+        if start >= end:
+            raise ValueError
+        return start, end
+    except (ValueError, OverflowError):
+        raise HTTPException(422, "Invalid time window") from None
+
+
+def metric_coverage(
+    *,
+    total_count: int,
+    ended_count: int,
+    valid_count: int,
+    denominator: float | None = None,
+    unavailable: bool = False,
+) -> MetricCoverage:
+    reason: Literal[
+        "no_ended_records", "no_valid_values", "zero_denominator", "unavailable"
+    ] | None
+    if unavailable:
+        reason = "unavailable"
+    elif total_count == 0:
+        reason = None
+    elif ended_count == 0:
+        reason = "no_ended_records"
+    elif valid_count == 0:
+        reason = "no_valid_values"
+    elif denominator is not None and denominator == 0:
+        reason = "zero_denominator"
+    else:
+        reason = None
+    return MetricCoverage(
+        applicable_count=ended_count,
+        valid_count=valid_count,
+        reason=reason,
+    )
+
+
+def aggregate_value(value: Any, coverage: MetricCoverage, total_count: int) -> float | None:
+    """Empty intervals have zero totals; incomplete nonempty intervals stay unknown."""
+    if total_count == 0:
+        return 0.0
+    if coverage.reason is not None:
+        return None
+    return float(value) if value is not None else None
+
+
+@router.get("/vehicles/{vehicle_id}/trip-summary", response_model=TripPeriodSummary)
+def trip_summary(
+    request: Request,
+    vehicle_id: Annotated[int, Path(ge=1)],
+    start: datetime,
+    end: datetime,
+) -> TripPeriodSummary:
+    """Aggregate a vehicle's complete explicit interval in one bounded SQL query."""
+    start, end = period_window(start, end)
+    with Session(storage(request).engine) as session:
+        range_basis = read_settings(session).preferences.range_basis
+    with connection(request) as database:
+        if not vehicle_exists(database, vehicle_id):
+            raise HTTPException(404, "Vehicle not found")
+        capabilities = capability_status(database)
+        estimate_available = capabilities["trip_summary"] is None
+        if estimate_available:
+            eligibility = trip_energy_conditions(range_basis)
+            start_range = f"d.start_{range_basis}_range_km"
+            end_range = f"d.end_{range_basis}_range_km"
+            energy = (
+                f"CASE WHEN {eligibility} THEN ({start_range} - {end_range}) "
+                "* trip_car.efficiency END"
+            )
+            valid_energy = f"CASE WHEN {eligibility} THEN 1 ELSE 0 END"
+            energy_distance = f"CASE WHEN {eligibility} THEN d.distance END"
+            car_join = "JOIN public.cars AS trip_car ON trip_car.id=d.car_id"
+        else:
+            energy = "NULL::numeric"
+            valid_energy = "0"
+            energy_distance = "NULL::numeric"
+            car_join = ""
+        finite_distance = "d.distance::text NOT IN ('NaN', 'Infinity', '-Infinity')"
+        finite_duration = "d.duration_min::text NOT IN ('NaN', 'Infinity', '-Infinity')"
+        valid_distance = (
+            "d.end_date IS NOT NULL AND d.distance IS NOT NULL "
+            f"AND {finite_distance} AND d.distance >= 0"
+        )
+        valid_duration = (
+            "d.end_date IS NOT NULL AND d.duration_min IS NOT NULL "
+            f"AND {finite_duration} AND d.duration_min >= 0"
+        )
+        row = database.execute(
+            f"SELECT count(*) AS total_count, "
+            "count(*) FILTER (WHERE d.end_date IS NOT NULL) AS ended_count, "
+            "count(*) FILTER (WHERE d.end_date IS NULL) AS not_ended_count, "
+            f"count(*) FILTER (WHERE {valid_distance}) AS distance_valid_count, "
+            f"sum(d.distance) FILTER (WHERE {valid_distance}) AS distance_km, "
+            f"count(*) FILTER (WHERE {valid_duration}) AS duration_valid_count, "
+            f"sum(d.duration_min) FILTER (WHERE {valid_duration}) AS duration_min, "
+            f"coalesce(sum({valid_energy}), 0) AS energy_valid_count, "
+            f"sum({energy}) AS estimated_energy_kwh, "
+            f"sum({energy_distance}) AS energy_distance_km "
+            f"FROM public.drives AS d {car_join} "
+            "WHERE d.car_id=%s AND d.start_date >= %s AND d.start_date < %s",
+            (vehicle_id, start, end),
+        ).fetchone()
+    assert row is not None
+    total_count = int(row["total_count"])
+    ended_count = int(row["ended_count"])
+    distance_coverage = metric_coverage(
+        total_count=total_count,
+        ended_count=ended_count,
+        valid_count=int(row["distance_valid_count"]),
+    )
+    duration_coverage = metric_coverage(
+        total_count=total_count,
+        ended_count=ended_count,
+        valid_count=int(row["duration_valid_count"]),
+    )
+    energy_coverage = metric_coverage(
+        total_count=total_count,
+        ended_count=ended_count,
+        valid_count=int(row["energy_valid_count"]),
+        unavailable=not estimate_available,
+    )
+    consumption_coverage = metric_coverage(
+        total_count=total_count,
+        ended_count=ended_count,
+        valid_count=int(row["energy_valid_count"]),
+        denominator=(
+            float(row["energy_distance_km"])
+            if row["energy_distance_km"] is not None
+            else None
+        ),
+        unavailable=not estimate_available,
+    )
+    consumption = (
+        None
+        if row["estimated_energy_kwh"] is None or row["energy_distance_km"] is None
+        else float(row["estimated_energy_kwh"]) / float(row["energy_distance_km"]) * 1000
+    )
+    return TripPeriodSummary(
+        vehicle_id=vehicle_id,
+        start=start,
+        end=end,
+        total_count=total_count,
+        ended_count=ended_count,
+        not_ended_count=int(row["not_ended_count"]),
+        distance_km=aggregate_value(row["distance_km"], distance_coverage, total_count),
+        duration_min=aggregate_value(row["duration_min"], duration_coverage, total_count),
+        estimated_energy_kwh=aggregate_value(
+            row["estimated_energy_kwh"], energy_coverage, total_count
+        ),
+        estimated_average_consumption_wh_per_km=aggregate_value(
+            consumption, consumption_coverage, total_count
+        ),
+        distance_coverage=distance_coverage,
+        duration_coverage=duration_coverage,
+        estimated_energy_coverage=energy_coverage,
+        estimated_average_consumption_coverage=consumption_coverage,
+        estimate_capability=Capability(
+            available=estimate_available, reason=capabilities["trip_summary"]
+        ),
+    )
 
 
 TRIP_FIELDS = (

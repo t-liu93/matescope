@@ -916,6 +916,70 @@
         }
       }
     },
+    "/api/v1/vehicles/{vehicle_id}/trip-summary": {
+      "get": {
+        "tags": [
+          "history"
+        ],
+        "summary": "Trip Summary",
+        "description": "Aggregate a vehicle's complete explicit interval in one bounded SQL query.",
+        "operationId": "trip_summary_api_v1_vehicles__vehicle_id__trip_summary_get",
+        "parameters": [
+          {
+            "name": "vehicle_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Vehicle Id"
+            }
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "title": "Start"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "title": "End"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TripPeriodSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/trips": {
       "get": {
         "tags": [
@@ -2069,6 +2133,43 @@
         ],
         "title": "ManagementInput"
       },
+      "MetricCoverage": {
+        "properties": {
+          "applicable_count": {
+            "type": "integer",
+            "title": "Applicable Count"
+          },
+          "valid_count": {
+            "type": "integer",
+            "title": "Valid Count"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "no_ended_records",
+                  "no_valid_values",
+                  "zero_denominator",
+                  "unavailable"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "applicable_count",
+          "valid_count",
+          "reason"
+        ],
+        "title": "MetricCoverage",
+        "description": "Validity of one period aggregate; applicability is every ended drive."
+      },
       "Onboarding": {
         "properties": {
           "step": {
@@ -3119,6 +3220,114 @@
           "end"
         ],
         "title": "TripPage"
+      },
+      "TripPeriodSummary": {
+        "properties": {
+          "vehicle_id": {
+            "type": "integer",
+            "title": "Vehicle Id"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "End"
+          },
+          "total_count": {
+            "type": "integer",
+            "title": "Total Count"
+          },
+          "ended_count": {
+            "type": "integer",
+            "title": "Ended Count"
+          },
+          "not_ended_count": {
+            "type": "integer",
+            "title": "Not Ended Count"
+          },
+          "distance_km": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance Km"
+          },
+          "duration_min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Min"
+          },
+          "estimated_energy_kwh": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Energy Kwh"
+          },
+          "estimated_average_consumption_wh_per_km": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Average Consumption Wh Per Km"
+          },
+          "distance_coverage": {
+            "$ref": "#/components/schemas/MetricCoverage"
+          },
+          "duration_coverage": {
+            "$ref": "#/components/schemas/MetricCoverage"
+          },
+          "estimated_energy_coverage": {
+            "$ref": "#/components/schemas/MetricCoverage"
+          },
+          "estimated_average_consumption_coverage": {
+            "$ref": "#/components/schemas/MetricCoverage"
+          },
+          "estimate_capability": {
+            "$ref": "#/components/schemas/Capability"
+          }
+        },
+        "type": "object",
+        "required": [
+          "vehicle_id",
+          "start",
+          "end",
+          "total_count",
+          "ended_count",
+          "not_ended_count",
+          "distance_km",
+          "duration_min",
+          "estimated_energy_kwh",
+          "estimated_average_consumption_wh_per_km",
+          "distance_coverage",
+          "duration_coverage",
+          "estimated_energy_coverage",
+          "estimated_average_consumption_coverage",
+          "estimate_capability"
+        ],
+        "title": "TripPeriodSummary"
       },
       "UserResponse": {
         "properties": {

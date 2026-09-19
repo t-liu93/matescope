@@ -469,6 +469,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/vehicles/{vehicle_id}/trip-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Trip Summary
+         * @description Aggregate a vehicle's complete explicit interval in one bounded SQL query.
+         */
+        get: operations["trip_summary_api_v1_vehicles__vehicle_id__trip_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/trips": {
         parameters: {
             query?: never;
@@ -939,6 +959,18 @@ export interface components {
              */
             current_password: string;
             proof: components["schemas"]["FactorProof"];
+        };
+        /**
+         * MetricCoverage
+         * @description Validity of one period aggregate; applicability is every ended drive.
+         */
+        MetricCoverage: {
+            /** Applicable Count */
+            applicable_count: number;
+            /** Valid Count */
+            valid_count: number;
+            /** Reason */
+            reason: ("no_ended_records" | "no_valid_values" | "zero_denominator" | "unavailable") | null;
         };
         /** Onboarding */
         Onboarding: {
@@ -1434,6 +1466,40 @@ export interface components {
              * Format: date-time
              */
             end: string;
+        };
+        /** TripPeriodSummary */
+        TripPeriodSummary: {
+            /** Vehicle Id */
+            vehicle_id: number;
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+            /** Total Count */
+            total_count: number;
+            /** Ended Count */
+            ended_count: number;
+            /** Not Ended Count */
+            not_ended_count: number;
+            /** Distance Km */
+            distance_km: number | null;
+            /** Duration Min */
+            duration_min: number | null;
+            /** Estimated Energy Kwh */
+            estimated_energy_kwh: number | null;
+            /** Estimated Average Consumption Wh Per Km */
+            estimated_average_consumption_wh_per_km: number | null;
+            distance_coverage: components["schemas"]["MetricCoverage"];
+            duration_coverage: components["schemas"]["MetricCoverage"];
+            estimated_energy_coverage: components["schemas"]["MetricCoverage"];
+            estimated_average_consumption_coverage: components["schemas"]["MetricCoverage"];
+            estimate_capability: components["schemas"]["Capability"];
         };
         /** UserResponse */
         UserResponse: {
@@ -2192,6 +2258,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResolvedHistoryWindow"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trip_summary_api_v1_vehicles__vehicle_id__trip_summary_get: {
+        parameters: {
+            query: {
+                start: string;
+                end: string;
+            };
+            header?: never;
+            path: {
+                vehicle_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TripPeriodSummary"];
                 };
             };
             /** @description Validation Error */
