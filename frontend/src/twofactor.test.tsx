@@ -327,6 +327,10 @@ describe("two-factor outer query lifetimes", () => {
     fill("two-factor-confirm-password", currentPassword); fill("two-factor-confirm-code", "000123"); submit("two-factor-confirm-code");
     if (stage === "shown") await screen.findByText("recovery-secret");
     await waitFor(() => expect(client.isFetching()).toBe(0));
+    sessionStorage.setItem("matescope-history-navigation", JSON.stringify({
+      cursors: { "/trips?vehicle=1": [null, "opaque"] },
+      returns: { "/trips?vehicle=1": { recordId: 42, scrollY: 640 } },
+    }));
     vi.mocked(query === "me" ? authApi.me : settingsApi.get).mockRejectedValue(new ApiError(401, "Not authenticated"));
     focusManager.setFocused(false); focusManager.setFocused(true);
     await screen.findByRole("heading", { name: "Sign in" });
@@ -336,5 +340,6 @@ describe("two-factor outer query lifetimes", () => {
     expect(screen.queryByText("recovery-secret")).toBeNull();
     expect(JSON.stringify(client.getQueryCache().getAll().map((q) => q.state.data))).not.toContain("recovery-secret");
     expect(client.getMutationCache().getAll()).toHaveLength(0);
+    expect(sessionStorage.getItem("matescope-history-navigation")).toBeNull();
   });
 });

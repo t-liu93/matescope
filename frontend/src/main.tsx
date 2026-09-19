@@ -55,7 +55,7 @@ import {
 } from "./history";
 import type { components } from "./api/schema";
 import i18n from "./i18n";
-import { PwaStatus, registerPwa, useOfflineVehicleDataGuard } from "./pwa";
+import { clearAuthenticatedSession, PwaStatus, registerPwa, useOfflineVehicleDataGuard } from "./pwa";
 import { HistoryContextProvider, useHistoryContext } from "./history-context";
 import appTheme from "./theme";
 
@@ -1169,7 +1169,7 @@ function TwoFactorSettings({ afterContinue }: { afterContinue?: () => void } = {
       const action = mode === "disable" ? authApi.disableTwoFactor(body) : authApi.regenerateRecoveryCodes(body);
       void action.then((data) => {
         if (!live()) return;
-        if (mode === "disable") { qc.clear(); navigate("/login"); return; }
+        if (mode === "disable") { clearAuthenticatedSession(qc); navigate("/login"); return; }
         const response = data as components["schemas"]["RecoveryCodesResponse"];
         setCsrf(response.csrf_token); setCodes(response.recovery_codes);
         refreshAfterFactorRotation(qc);
@@ -1204,7 +1204,7 @@ function Setup() {
   });
   if (settings.isPending) return <Busy />;
   if (settings.error instanceof ApiError && settings.error.status === 401)
-    return <Navigate to="/login" replace />;
+    return <SessionEndedRedirect />;
   if (!settings.data?.onboarding)
     return (
       <ReadFailure
@@ -1333,13 +1333,13 @@ function SettingsPage() {
   const logout = useMutation({
     mutationFn: authApi.logout,
     onSuccess: () => {
-      qc.clear();
+      clearAuthenticatedSession(qc);
       navigate("/login");
     },
   });
   if (settings.isPending) return <Busy />;
   if (settings.error instanceof ApiError && settings.error.status === 401)
-    return <Navigate to="/login" replace />;
+    return <SessionEndedRedirect />;
   if (!settings.data)
     return (
       <ReadFailure
@@ -1406,7 +1406,7 @@ function PasswordChange() {
     void authApi.changePassword({ current_password: formCurrent, new_password: formNext,
       password_confirmation: formConfirm,
       ...(factor.data?.enabled ? { proof: { method, code: proofCode } } : {}) })
-      .then(() => { if (mounted.current) { qc.clear(); navigate("/login"); } })
+      .then(() => { if (mounted.current) { clearAuthenticatedSession(qc); navigate("/login"); } })
       .catch((reason: unknown) => { if (mounted.current) setError(reason); })
       .finally(() => { if (mounted.current) setPending(false); });
   };
@@ -1486,6 +1486,14 @@ function ReadFailure({
   );
 }
 
+function SessionEndedRedirect() {
+  const client = useQueryClient();
+  useEffect(() => {
+    clearAuthenticatedSession(client);
+  }, [client]);
+  return <Navigate to="/login" replace />;
+}
+
 function Protected({ children }: { children: React.ReactNode }) {
   const me = useQuery({
     queryKey: ["me"],
@@ -1493,7 +1501,7 @@ function Protected({ children }: { children: React.ReactNode }) {
   });
   if (me.isPending) return <Busy />;
   if (me.error instanceof ApiError && me.error.status === 401)
-    return <Navigate to="/login" replace />;
+    return <SessionEndedRedirect />;
   if (!me.data)
     return (
       <ReadFailure retry={() => void me.refetch()} pending={me.isFetching} />

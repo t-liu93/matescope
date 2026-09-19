@@ -4,6 +4,8 @@ import type { QueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { clearHistoryNavigationState } from "./history-navigation";
+
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
@@ -41,6 +43,13 @@ export function clearVehicleData(client: QueryClient) {
   const filters = { predicate: (query: { queryKey: readonly unknown[] }) => isVehicleDataQuery(query.queryKey) };
   void client.cancelQueries(filters);
   client.removeQueries(filters);
+  clearHistoryNavigationState();
+}
+
+/** End an authenticated browser session without retaining history navigation metadata. */
+export function clearAuthenticatedSession(client: QueryClient) {
+  client.clear();
+  clearHistoryNavigationState();
 }
 
 export function useOnlineStatus() {

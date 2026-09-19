@@ -1,9 +1,23 @@
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 
-import { clearVehicleData } from "./pwa";
+import { clearAuthenticatedSession, clearVehicleData } from "./pwa";
 
 describe("offline vehicle-data guard", () => {
+  it("clears navigation metadata when an authenticated session ends", () => {
+    const client = new QueryClient();
+    client.setQueryData(["me"], { username: "admin" });
+    sessionStorage.setItem("matescope-history-navigation", JSON.stringify({
+      cursors: { "/trips?vehicle=1": [null, "opaque"] },
+      returns: { "/trips?vehicle=1": { recordId: 42, scrollY: 640 } },
+    }));
+
+    clearAuthenticatedSession(client);
+
+    expect(client.getQueryData(["me"])).toBeUndefined();
+    expect(sessionStorage.getItem("matescope-history-navigation")).toBeNull();
+  });
+
   it("removes every vehicle-data query family without touching account or two-factor state", () => {
     const client = new QueryClient();
     client.setQueryData(["vehicles"], { items: [{ name: "SYNTHETIC Atlas" }] });

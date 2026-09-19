@@ -263,13 +263,42 @@ test.describe("T09 calendar history filters", () => {
     await expect.poll(() => lists.at(-1)?.searchParams.get("cursor")).toBe("cursor-1");
     await page.getByRole("button", { name: "This year", exact: true }).click();
     await page.getByRole("button", { name: "Apply", exact: true }).click();
+    await expect(page).not.toHaveURL(/[?&](cursor|page)=/);
     await expect.poll(() => lists.at(-1)?.searchParams.get("cursor")).toBeNull();
     await page.getByRole("button", { name: "Next page", exact: true }).click();
+    await expect(page).toHaveURL(/cursor=cursor-1.*page=2/);
     await expect.poll(() => lists.at(-1)?.searchParams.get("cursor")).toBe("cursor-1");
     await page.getByRole("textbox", { name: "Vehicle", exact: true }).click();
     await page.getByRole("option", { name: "SYNTHETIC Boreal", exact: true }).click();
+    await expect(page).not.toHaveURL(/[?&](cursor|page)=/);
     await expect.poll(() => lists.at(-1)?.searchParams.get("vehicle_id")).toBe("2");
     await expect.poll(() => lists.at(-1)?.searchParams.get("cursor")).toBeNull();
+    await page.getByRole("button", { name: "Next page", exact: true }).click();
+    await expect(page).toHaveURL(/cursor=cursor-1.*page=2/);
+  });
+
+  test("restores a paged list after reload and browser Back/Forward", async ({ page }) => {
+    const lists = await mockHistoryApi(page);
+    await localTiles(page);
+    await page.goto("/trips");
+    await page.getByRole("button", { name: "Next page", exact: true }).click();
+    await expect(page).toHaveURL(/cursor=cursor-1.*page=2/);
+    await page.reload();
+    await expect.poll(() => lists.at(-1)?.searchParams.get("cursor")).toBe("cursor-1");
+    await page.evaluate(() => { document.body.style.minHeight = "2400px"; window.scrollTo(0, 640); });
+    const record = page.locator('[data-history-record-id="1"]');
+    await record.click();
+    await expect(page).toHaveURL(/\/trips\/1\?.*cursor=cursor-1.*page=2/);
+    await page.goBack();
+    await expect(page).toHaveURL(/\/trips\?.*cursor=cursor-1.*page=2/);
+    await expect(record).toBeFocused();
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+    await page.goForward();
+    await expect(page).toHaveURL(/\/trips\/1\?.*cursor=cursor-1.*page=2/);
+    await page.goBack();
+    await expect(page).toHaveURL(/\/trips\?.*cursor=cursor-1.*page=2/);
+    await expect(record).toBeFocused();
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
   });
 
   test("does not apply a delayed range after Cancel", async ({ page }) => {

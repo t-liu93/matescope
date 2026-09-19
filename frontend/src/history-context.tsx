@@ -27,7 +27,7 @@ type Selection = {
   setWindow: (window: HistoryWindow) => void;
   setPreset: (preset: HistoryWindowPreset, range?: [string, string]) => Promise<void>;
   cancelPreset: () => void;
-  historyPath: (pathname: string) => string;
+  historyPath: (pathname: string, options?: { includeCursor?: boolean }) => string;
 };
 
 const HistoryContext = createContext<Selection | null>(null);
@@ -110,7 +110,7 @@ export function HistoryContextProvider({ children }: { children: ReactNode }) {
     if (selectedVehicle && id !== selectedVehicle.id) clearVehicleData(client);
     setRememberedVehicleId(id);
     const next = new URLSearchParams(location.search);
-    next.set("vehicle", String(id)); next.delete("cursor");
+    next.set("vehicle", String(id)); next.delete("cursor"); next.delete("page");
     // Fixed UTC windows are a navigation contract. All-history instead belongs
     // to each vehicle's earliest record and must be resolved again after a switch.
     if (next.get("preset") === "all_history") { next.delete("start"); next.delete("end"); }
@@ -121,7 +121,7 @@ export function HistoryContextProvider({ children }: { children: ReactNode }) {
     cancelPreset();
     clearVehicleData(client);
     const next = new URLSearchParams(location.search);
-    next.set("vehicle", String(selectedVehicle.id)); next.set("start", window.start); next.set("end", window.end); next.delete("cursor");
+    next.set("vehicle", String(selectedVehicle.id)); next.set("start", window.start); next.set("end", window.end); next.delete("cursor"); next.delete("page");
     navigate(`${location.pathname}?${next.toString()}`);
   }, [cancelPreset, client, location.search, location.pathname, navigate, selectedVehicle]);
   const setPreset = useCallback(async (nextPreset: HistoryWindowPreset, range?: [string, string]) => {
@@ -152,7 +152,7 @@ export function HistoryContextProvider({ children }: { children: ReactNode }) {
     const next = new URLSearchParams(location.search);
     next.set("vehicle", String(vehicleId));
     next.set("preset", nextPreset);
-    next.delete("cursor");
+    next.delete("cursor"); next.delete("page");
     next.delete("start"); next.delete("end");
     if (nextPreset !== "all_history" && resolved.start && resolved.end) {
       next.set("start", resolved.start); next.set("end", resolved.end);
@@ -160,10 +160,14 @@ export function HistoryContextProvider({ children }: { children: ReactNode }) {
     clearVehicleData(client);
     navigate(`${location.pathname}?${next.toString()}`);
   }, [cancelPreset, client, location.search, location.pathname, navigate, selectedVehicle]);
-  const historyPath = useCallback((pathname: string) => {
+  const historyPath = useCallback((pathname: string, options?: { includeCursor?: boolean }) => {
     if (!selectedVehicle || !resolvedWindow) return pathname;
     const scoped = new URLSearchParams({ vehicle: String(selectedVehicle.id), start: resolvedWindow.start, end: resolvedWindow.end });
     if (search.get("preset")) scoped.set("preset", search.get("preset")!);
+    if (options?.includeCursor && search.get("cursor")) {
+      scoped.set("cursor", search.get("cursor")!);
+      if (search.get("page")) scoped.set("page", search.get("page")!);
+    }
     return `${pathname}?${scoped.toString()}`;
   }, [resolvedWindow, search, selectedVehicle]);
   const value = useMemo(() => ({ vehicle: selectedVehicle, vehicles: items, window: resolvedWindow, preset, emptyWindow: !suppliedWindow && Boolean(resolve.data?.is_empty), unavailableUrlVehicle, selectionLoading: settings.isPending || vehicles.isPending, selectionError: Boolean(settings.error || vehicles.error), setVehicleId, setWindow, setPreset, cancelPreset, historyPath }), [selectedVehicle, items, resolvedWindow, preset, suppliedWindow, resolve.data?.is_empty, unavailableUrlVehicle, settings.isPending, vehicles.isPending, settings.error, vehicles.error, setVehicleId, setWindow, setPreset, cancelPreset, historyPath]);

@@ -14,7 +14,7 @@ import { DatePickerInput } from "@mantine/dates";
 import { useMediaQuery } from "@mantine/hooks";
 import { useQuery } from "@tanstack/react-query";
 import { Component, Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { ApiError, historyApi, settingsApi, type HistoryWindow } from "./api/client";
@@ -24,6 +24,7 @@ import type { HistoryWindowPreset } from "./api/client";
 import i18n from "./i18n";
 import { useOnlineStatus } from "./pwa";
 import { HistorySelectionGuard, useHistoryContext } from "./history-context";
+import { historyReturn, historyScope, previousCursor, rememberCursor, rememberHistoryReturn } from "./history-navigation";
 
 type Trip = components["schemas"]["Trip"];
 type Charge = components["schemas"]["Charge"];
@@ -256,16 +257,17 @@ function HistoryFilters({
 function HistoryList({ kind }: { kind: "trips" | "charges" }) {
   const { t } = useTranslation();
   const { vehicle, window: scopedWindow, emptyWindow, historyPath } = useHistoryContext();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [draft, setDraft] = useState(defaultWindow);
-  const [cursors, setCursors] = useState<string[]>([]);
-  const scope = `${vehicle?.id ?? ""}:${scopedWindow?.start ?? ""}:${scopedWindow?.end ?? ""}`;
-  const [cursorScope, setCursorScope] = useState(scope);
-  const activeCursors = cursorScope === scope ? cursors : [];
-  const cursor = activeCursors.at(-1);
+  const search = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const cursor = search.get("cursor") ?? undefined;
+  const pageNumber = Math.max(1, Number(search.get("page")) || 1);
+  const scope = historyScope(location.pathname, search);
   const preferences = useHistorySettings();
   const online = useOnlineStatus();
   useEffect(() => { if (scopedWindow) setDraft(scopedWindow); }, [scopedWindow]);
-  useEffect(() => { setCursors([]); setCursorScope(scope); }, [scope]);
+  useEffect(() => { rememberCursor(scope, cursor ?? null); }, [cursor, scope]);
   const query = useQuery<HistoryPage>({
     queryKey: [kind, vehicle?.id, scopedWindow?.start, scopedWindow?.end, preferences.data?.preferences?.range_basis, cursor],
     queryFn: ({ signal }) => kind === "trips"
@@ -287,6 +289,24 @@ function HistoryList({ kind }: { kind: "trips" | "charges" }) {
     if (scopedWindow) setDraft(scopedWindow);
   };
   const page = query.data;
+  useEffect(() => {
+    if (!page?.items.length) return;
+    const target = historyReturn(`${location.pathname}${location.search}`);
+    if (!target) return;
+    const frame = window.requestAnimationFrame(() => {
+      const record = document.querySelector<HTMLElement>(`[data-history-record-id="${target.recordId}"]`);
+      record?.focus({ preventScroll: true });
+      window.scrollTo({ top: target.scrollY, behavior: "auto" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [location.pathname, location.search, page?.items.length]);
+  const moveToCursor = (nextCursor: string | null, nextPage: number) => {
+    const next = new URLSearchParams(location.search);
+    if (nextCursor) next.set("cursor", nextCursor); else next.delete("cursor");
+    if (nextPage > 1) next.set("page", String(nextPage)); else next.delete("page");
+    navigate(`${location.pathname}?${next.toString()}`);
+  };
+  const priorCursor = previousCursor(scope, cursor ?? null);
   if (!online) return <OfflineVehicleData />;
   if (preferences.isPending) return <Container py="xl"><Text>{t("loading")}</Text></Container>;
   if (preferences.error || !preferences.data?.preferences?.saved)
@@ -303,17 +323,22 @@ function HistoryList({ kind }: { kind: "trips" | "charges" }) {
         {query.isPending && <Text>{t("loading")}</Text>}
         {query.error && <HistoryFailure retry={() => void query.refetch()} />}
         {(emptyWindow || page?.items.length === 0) && <Alert>{t("noHistory")}</Alert>}
-        {kind === "trips" ? <TripRows items={(page?.items ?? []) as Trip[]} timezone={timezone} historyPath={historyPath} /> : <ChargeRows items={(page?.items ?? []) as Charge[]} timezone={timezone} historyPath={historyPath} currency={preferences.data.preferences.display_currency ?? null} />}
+        {kind === "trips" ? <TripRows items={(page?.items ?? []) as Trip[]} timezone={timezone} historyPath={historyPath} listPath={`${location.pathname}${location.search}`} /> : <ChargeRows items={(page?.items ?? []) as Charge[]} timezone={timezone} historyPath={historyPath} listPath={`${location.pathname}${location.search}`} currency={preferences.data.preferences.display_currency ?? null} />}
         <Group>
-          {activeCursors.length > 0 && <Button variant="light" onClick={() => { setCursorScope(scope); setCursors((value) => [...value].slice(0, -1)); }}>{t("previousPage")}</Button>}
-          {page?.next_cursor && <Button variant="light" onClick={() => { setCursorScope(scope); setCursors((value) => [...value, page.next_cursor!]); }}>{t("nextPage")}</Button>}
+          {priorCursor !== undefined && <Button variant="light" onClick={() => moveToCursor(priorCursor, pageNumber - 1)}>{t("previousPage")}</Button>}
+          {page?.next_cursor && <Button variant="light" onClick={() => moveToCursor(page.next_cursor!, pageNumber + 1)}>{t("nextPage")}</Button>}
         </Group>
       </Stack>
     </Container>
   );
 }
 
-function ChargeRows({ items, timezone, historyPath, currency }: { items: Charge[]; timezone: string; historyPath: (pathname: string) => string; currency: string | null }) {
+function RecordDetailLink({ to, listPath, recordId }: { to: string; listPath: string; recordId: number }) {
+  const { t } = useTranslation();
+  return <Button component={Link} variant="light" to={to} state={{ historyReturnPath: listPath }} onClick={() => rememberHistoryReturn(listPath, recordId, window.scrollY)} data-history-record-id={recordId}>{t("viewDetails")}</Button>;
+}
+
+function ChargeRows({ items, timezone, historyPath, listPath, currency }: { items: Charge[]; timezone: string; historyPath: (pathname: string, options?: { includeCursor?: boolean }) => string; listPath: string; currency: string | null }) {
   const { t } = useTranslation();
   const groups = useMemo(() => {
     const ordered = [...items].sort((a, b) => b.start.localeCompare(a.start) || b.id - a.id);
@@ -336,13 +361,13 @@ function ChargeRows({ items, timezone, historyPath, currency }: { items: Charge[
           <Text>{t("duration")}: {item.end ? duration(item.duration_min) : t("recordNotEnded")}</Text>
           <Text>{t("recordedCost")}: {cost(item.cost, currency, t)} {!currency && item.cost != null && <span className="currency-unconfigured">{t("currencyNotConfigured")}</span>}</Text>
         </SimpleGrid>
-        <Button component={Link} variant="light" to={historyPath(`/charges/${item.id}`)}>{t("viewDetails")}</Button>
+        <RecordDetailLink to={historyPath(`/charges/${item.id}`, { includeCursor: true })} listPath={listPath} recordId={item.id} />
       </Stack>
     </Card>)}
   </Fragment>)}</Stack>;
 }
 
-function TripRows({ items, timezone, historyPath }: { items: Trip[]; timezone: string; historyPath: (pathname: string) => string }) {
+function TripRows({ items, timezone, historyPath, listPath }: { items: Trip[]; timezone: string; historyPath: (pathname: string, options?: { includeCursor?: boolean }) => string; listPath: string }) {
   const { t } = useTranslation();
   const desktop = useMediaQuery("(min-width: 1200px)");
   const groups = useMemo(() => {
@@ -366,7 +391,7 @@ function TripRows({ items, timezone, historyPath }: { items: Trip[]; timezone: s
           <Text>{t("estimatedEnergy")}: {value(item.estimated_energy_kwh, "kWh")}</Text>
           {desktop && <Text>{t("estimatedConsumption")}: {value(item.estimated_average_consumption_wh_per_km, "Wh/km")}</Text>}
         </SimpleGrid>
-        <Button component={Link} variant="light" to={historyPath(`/trips/${item.id}`)}>{t("viewDetails")}</Button>
+        <RecordDetailLink to={historyPath(`/trips/${item.id}`, { includeCursor: true })} listPath={listPath} recordId={item.id} />
       </Stack>
     </Card>)}
   </Fragment>)}</Stack>;
@@ -385,10 +410,14 @@ function DetailValues({ item, kind, timezone }: { item: Trip | Charge; kind: "tr
 function HistoryDetail({ kind }: { kind: "trips" | "charges" }) {
   const { t } = useTranslation();
   const params = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
   const identifier = Number(params.id);
   const settings = useHistorySettings();
   const online = useOnlineStatus();
   const { setVehicleId, historyPath } = useHistoryContext();
+  const returnPath = typeof location.state === "object" && location.state !== null && "historyReturnPath" in location.state && typeof location.state.historyReturnPath === "string"
+    ? location.state.historyReturnPath : null;
   const detail = useQuery<Trip | Charge>({
     queryKey: [kind, identifier],
     queryFn: ({ signal }) => kind === "trips" ? historyApi.trip(identifier, { signal }) : historyApi.charge(identifier, { signal }),
@@ -415,7 +444,7 @@ function HistoryDetail({ kind }: { kind: "trips" | "charges" }) {
   const item = detail.data;
   const timezone = settings.data.preferences.timezone;
   return <Container size="md" py="xl"><Stack gap="lg">
-    <Button component={Link} variant="subtle" to={historyPath(`/${kind}`)}>{kind === "trips" ? t("backToTrips") : t("backToCharges")}</Button>
+    <Button variant="subtle" onClick={() => returnPath ? navigate(-1) : navigate(historyPath(`/${kind}`, { includeCursor: true }))}>{kind === "trips" ? t("backToTrips") : t("backToCharges")}</Button>
     <Title order={1}>{kind === "trips" ? t("trip") : t("charge")}</Title>
     <Text size="sm" c="dimmed">{t("timesShownIn", { timezone })}</Text>
     <Card withBorder radius="md"><DetailValues item={item} kind={kind} timezone={timezone} /></Card>
