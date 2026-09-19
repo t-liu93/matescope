@@ -594,6 +594,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/charges/{charge_id}/series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Charge Series */
+        get: operations["charge_series_api_v1_charges__charge_id__series_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/trips/{trip_id}/trajectory": {
         parameters: {
             query?: never;
@@ -779,6 +796,14 @@ export interface components {
             duration_coverage: components["schemas"]["MetricCoverage"];
             cost_coverage: components["schemas"]["MetricCoverage"];
             cost_capability: components["schemas"]["Capability"];
+        };
+        /** ChargeSeries */
+        ChargeSeries: {
+            /** Charge Id */
+            charge_id: number;
+            capability: components["schemas"]["Capability"];
+            /** Series */
+            series: components["schemas"]["TimeSeries"][];
         };
         /** ConfirmInput */
         ConfirmInput: {
@@ -2610,6 +2635,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TripSeries"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    charge_series_api_v1_charges__charge_id__series_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                charge_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChargeSeries"];
                 };
             };
             /** @description Validation Error */

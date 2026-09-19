@@ -129,6 +129,13 @@ CAPABILITY_COLUMNS: dict[str, dict[str, tuple[str, ...]]] = {
             "outside_temp",
         ),
     },
+    # Date and charging-process identity are the safe common prerequisite for
+    # every charge-series query. Keep them separate from measurements so one
+    # unreadable measurement does not hide the other two curves.
+    "charge_series_metadata": {"charges": ("id", "charging_process_id", "date")},
+    "charge_series_power": {"charges": ("charger_power",)},
+    "charge_series_battery": {"charges": ("battery_level",)},
+    "charge_series_outside_temperature": {"charges": ("outside_temp",)},
 }
 
 TEXT_TYPES = {"text", "varchar"}

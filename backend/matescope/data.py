@@ -211,6 +211,12 @@ class TripSeries(BaseModel):
     series: list[TimeSeries]
 
 
+class ChargeSeries(BaseModel):
+    charge_id: int
+    capability: Capability
+    series: list[TimeSeries]
+
+
 HistoryWindowPreset = Literal[
     "today",
     "last_7_days",
@@ -1124,6 +1130,124 @@ def trip_series(request: Request, trip_id: int) -> TripSeries:
                 )
             )
     return TripSeries(trip_id=trip_id, capability=capability, series=values)
+
+
+CHARGE_SERIES: tuple[tuple[SeriesName, str, str, SeriesAggregation, str], ...] = (
+    ("power", "charger_power", "kW", "mean_min_max", "charge_series_power"),
+    ("battery", "battery_level", "%", "last", "charge_series_battery"),
+    (
+        "outside_temperature", "outside_temp", "°C", "mean_min_max",
+        "charge_series_outside_temperature",
+    ),
+)
+
+
+def charge_series_metadata(
+    database: psycopg.Connection[dict[str, Any]], charge_id: int
+) -> dict[str, Any]:
+    row = database.execute(
+        "SELECT count(*) AS sample_count, min(date) AS start, max(date) AS end "
+        "FROM public.charges WHERE charging_process_id=%s",
+        (charge_id,),
+    ).fetchone()
+    return row or {"sample_count": 0, "start": None, "end": None}
+
+
+def charge_series_points(
+    database: psycopg.Connection[dict[str, Any]],
+    charge_id: int,
+    column: str,
+    sample_count: int,
+) -> list[dict[str, Any]]:
+    """Return bounded charge samples without bridging null or time gaps.
+
+    ``column`` comes only from ``CHARGE_SERIES`` and therefore remains an
+    allowlisted SQL projection rather than user-provided SQL.
+    """
+    value = (
+        f"CASE WHEN ch.{column}::text IN ('NaN', 'Infinity', '-Infinity') "
+        f"THEN NULL ELSE ch.{column} END"
+    )
+    if sample_count <= SERIES_BUCKET_LIMIT:
+        return database.execute(
+            "WITH samples AS ("
+            f"SELECT ch.id,ch.date,{value} AS value FROM public.charges AS ch "
+            "WHERE ch.charging_process_id=%s"
+            "), marked AS (SELECT *,lag(date) OVER (ORDER BY date,id) AS previous_time "
+            "FROM samples) "
+            "SELECT date AS time,value AS mean,value AS min,value AS max,value,"
+            "coalesce(value IS NULL OR date-previous_time > interval '5 minutes',false) "
+            "AS discontinuity FROM marked ORDER BY date,id",
+            (charge_id,),
+        ).fetchall()
+    return database.execute(
+        "WITH bounds AS (SELECT min(date) AS start,max(date) AS ending FROM public.charges "
+        "WHERE charging_process_id=%s), samples AS ("
+        f"SELECT ch.id,ch.date,{value} AS value,"
+        "lag(ch.date) OVER (ORDER BY ch.date,ch.id) AS previous_time,"
+        "CASE WHEN bounds.ending=bounds.start THEN 0 ELSE least(599,floor("
+        "extract(epoch FROM ch.date-bounds.start)/"
+        "(extract(epoch FROM bounds.ending-bounds.start)/600))::integer) END AS bucket "
+        "FROM public.charges AS ch CROSS JOIN bounds WHERE ch.charging_process_id=%s), "
+        "grouped AS (SELECT bucket,min(date) AS time,max(date) AS last_time,avg(value) AS mean,"
+        "min(value) AS min,max(value) AS max,"
+        "(array_agg(value ORDER BY date DESC,id DESC) FILTER "
+        "(WHERE value IS NOT NULL))[1] AS value,"
+        "bool_or(value IS NULL OR date-previous_time > interval '5 minutes') "
+        "AS internal_discontinuity FROM samples GROUP BY bucket), marked AS "
+        "(SELECT *,lag(bucket) OVER (ORDER BY bucket) AS previous_bucket,"
+        "lag(last_time) OVER (ORDER BY bucket) AS previous_last_time FROM grouped) "
+        "SELECT time,mean,min,max,value,coalesce(internal_discontinuity OR "
+        "previous_bucket IS NOT NULL AND (bucket-previous_bucket > 1 OR "
+        "time-previous_last_time > interval '5 minutes'),false) AS discontinuity "
+        "FROM marked ORDER BY time,bucket",
+        (charge_id, charge_id),
+    ).fetchall()
+
+
+@router.get("/charges/{charge_id}/series", response_model=ChargeSeries)
+def charge_series(request: Request, charge_id: int) -> ChargeSeries:
+    with connection(request) as database:
+        exists = database.execute(
+            "SELECT 1 FROM public.charging_processes WHERE id=%s", (charge_id,)
+        ).fetchone()
+        if exists is None:
+            raise HTTPException(404, "Record not found")
+        statuses = capability_status(database)
+        reason = statuses["charge_series"]
+        capability = Capability(available=reason is None, reason=reason)
+        metadata_reason = statuses["charge_series_metadata"]
+        metadata = (
+            charge_series_metadata(database, charge_id)
+            if metadata_reason is None
+            else {"sample_count": 0, "start": None, "end": None}
+        )
+        samples = int(metadata["sample_count"])
+        values: list[TimeSeries] = []
+        for name, column, unit, aggregation, capability_name in CHARGE_SERIES:
+            series_reason = metadata_reason or statuses[capability_name]
+            series_capability = Capability(
+                available=series_reason is None, reason=series_reason
+            )
+            points = (
+                charge_series_points(database, charge_id, column, samples)
+                if series_reason is None
+                else []
+            )
+            values.append(
+                TimeSeries(
+                    name=name,
+                    unit=unit,
+                    start=metadata["start"],
+                    end=metadata["end"],
+                    sample_count=samples,
+                    bucket_count=len(points),
+                    aggregation="raw" if samples <= SERIES_BUCKET_LIMIT else aggregation,
+                    capability=series_capability,
+                    points=[SeriesPoint(**point) for point in points],
+                )
+            )
+    return ChargeSeries(charge_id=charge_id, capability=capability, series=values)
 
 
 @router.get("/trips/{trip_id}/trajectory", response_model=Trajectory)

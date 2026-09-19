@@ -1203,6 +1203,152 @@ def test_trip_series_missing_one_column_only_hides_its_own_series(
             assert series["power"]["capability"] == {"available": True, "reason": None}
 
 
+@contextmanager
+def charge_series_fixture(
+    admin: psycopg.Connection[Any], charge_id: int, sample_ids: list[int]
+) -> Iterator[None]:
+    """Create a fully owned charge process and remove precisely those rows."""
+    assert not admin.execute(
+        "SELECT id FROM public.charging_processes WHERE id=%s", (charge_id,)
+    ).fetchall(), "T22 charging-process identifier must be unused"
+    assert not admin.execute(
+        "SELECT id FROM public.charges WHERE id = ANY(%s)", (sample_ids,)
+    ).fetchall(), "T22 charge-sample identifiers must be unused"
+    created_process = False
+    try:
+        admin.execute(
+            "INSERT INTO public.charging_processes "
+            "(id,car_id,start_date,end_date,charge_energy_added,duration_min) "
+            "VALUES (%s,1,TIMESTAMP '2025-03-01 00:00:00',"
+            "TIMESTAMP '2025-03-01 12:00:00',1,1)",
+            (charge_id,),
+        )
+        created_process = True
+        yield
+    finally:
+        if created_process:
+            deleted_samples = admin.execute(
+                "DELETE FROM public.charges WHERE charging_process_id=%s RETURNING id",
+                (charge_id,),
+            ).fetchall()
+            assert {row[0] for row in deleted_samples} == set(sample_ids)
+            deleted_process = admin.execute(
+                "DELETE FROM public.charging_processes WHERE id=%s RETURNING id", (charge_id,)
+            ).fetchall()
+            assert deleted_process == [(charge_id,)]
+        assert not admin.execute(
+            "SELECT id FROM public.charging_processes WHERE id=%s", (charge_id,)
+        ).fetchall()
+        assert not admin.execute(
+            "SELECT id FROM public.charges WHERE id = ANY(%s)", (sample_ids,)
+        ).fetchall()
+
+
+def test_charge_series_is_local_when_optional_columns_are_unreadable(
+    client: TestClient,
+) -> None:
+    response = client.get("/api/v1/charges/1/series")
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["charge_id"] == 1
+    assert result["capability"] == {"available": False, "reason": "insufficient_permissions"}
+    assert {item["name"] for item in result["series"]} == {
+        "power", "battery", "outside_temperature"
+    }
+    assert all(
+        series["capability"] == {"available": False, "reason": "insufficient_permissions"}
+        and series["points"] == []
+        for series in result["series"]
+    )
+
+
+def test_charge_series_raw_samples_keep_gaps_nulls_negative_power_and_equal_times(
+    client: TestClient, admin: psycopg.Connection[Any]
+) -> None:
+    charge_id = 9822
+    sample_ids = [982201, 982202, 982203]
+    with charge_series_fixture(admin, charge_id, sample_ids):
+        admin.execute(
+            "INSERT INTO public.charges "
+            "(id,charging_process_id,date,charger_power,battery_level,outside_temp) VALUES "
+            "(982201,9822,TIMESTAMP '2025-03-01 00:00:00',-1.5,75,4),"
+            "(982202,9822,TIMESTAMP '2025-03-01 00:00:00',-8,74,NULL),"
+            "(982203,9822,TIMESTAMP '2025-03-01 00:06:00',-3,73,6)"
+        )
+        with optional_grants(admin):
+            response = client.get(f"/api/v1/charges/{charge_id}/series")
+            assert response.status_code == 200, response.text
+            result = response.json()
+            assert result["capability"] == {"available": True, "reason": None}
+            assert all(item["capability"] == {"available": True, "reason": None}
+                       for item in result["series"])
+            power = next(item for item in result["series"] if item["name"] == "power")
+            assert power["unit"] == "kW"
+            assert power["sample_count"] == power["bucket_count"] == 3
+            assert power["aggregation"] == "raw"
+            assert [point["value"] for point in power["points"]] == [-1.5, -8, -3]
+            assert [point["discontinuity"] for point in power["points"]] == [False, False, True]
+            temperature = next(
+                item for item in result["series"] if item["name"] == "outside_temperature"
+            )
+            assert temperature["points"][1]["value"] is None
+            assert temperature["points"][1]["discontinuity"] is True
+
+
+def test_charge_series_long_records_use_at_most_600_sql_buckets(
+    client: TestClient, admin: psycopg.Connection[Any]
+) -> None:
+    charge_id = 9823
+    sample_ids = list(range(982300, 982901))
+    with charge_series_fixture(admin, charge_id, sample_ids):
+        admin.execute(
+            "INSERT INTO public.charges "
+            "(id,charging_process_id,date,charger_power,battery_level,outside_temp) "
+            "SELECT 982300 + sample,9823,TIMESTAMP '2025-03-01 00:00:00' + "
+            "sample * INTERVAL '1 minute',CASE WHEN sample=300 THEN -4 ELSE 7 END,"
+            "80 - mod(sample,20),5 FROM generate_series(0,600) AS sample"
+        )
+        with optional_grants(admin):
+            response = client.get(f"/api/v1/charges/{charge_id}/series")
+            assert response.status_code == 200, response.text
+            power = next(item for item in response.json()["series"] if item["name"] == "power")
+            battery = next(item for item in response.json()["series"] if item["name"] == "battery")
+            assert power["sample_count"] == 601
+            assert 1 <= power["bucket_count"] <= 600
+            assert power["aggregation"] == "mean_min_max"
+            assert any(point["min"] is not None and point["min"] < 0 for point in power["points"])
+            assert battery["aggregation"] == "last"
+            assert any(point["value"] is not None for point in battery["points"])
+
+
+def test_charge_series_missing_one_column_only_hides_its_own_series(
+    client: TestClient, admin: psycopg.Connection[Any]
+) -> None:
+    with optional_grants(admin):
+        with mutation(
+            admin,
+            "REVOKE SELECT (outside_temp) ON public.charges FROM matescope_readonly",
+            "GRANT SELECT (outside_temp) ON public.charges TO matescope_readonly",
+        ):
+            response = client.get("/api/v1/charges/1/series")
+            assert response.status_code == 200, response.text
+            series = {item["name"]: item for item in response.json()["series"]}
+            assert series["outside_temperature"]["capability"] == {
+                "available": False,
+                "reason": "insufficient_permissions",
+            }
+            assert series["outside_temperature"]["points"] == []
+            assert series["power"]["capability"] == {"available": True, "reason": None}
+
+
+def test_charge_series_rejects_unknown_charge(
+    client: TestClient, admin: psycopg.Connection[Any]
+) -> None:
+    with optional_grants(admin):
+        response = client.get("/api/v1/charges/999999/series")
+    assert response.status_code == 404
+
+
 def test_history_capabilities_report_schema_and_permission_separately(
     client: TestClient, admin: psycopg.Connection[Any]
 ) -> None:

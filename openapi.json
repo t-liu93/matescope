@@ -1396,6 +1396,48 @@
         }
       }
     },
+    "/api/v1/charges/{charge_id}/series": {
+      "get": {
+        "tags": [
+          "history"
+        ],
+        "summary": "Charge Series",
+        "operationId": "charge_series_api_v1_charges__charge_id__series_get",
+        "parameters": [
+          {
+            "name": "charge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Charge Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChargeSeries"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/trips/{trip_id}/trajectory": {
       "get": {
         "tags": [
@@ -1883,6 +1925,31 @@
           "cost_capability"
         ],
         "title": "ChargePeriodSummary"
+      },
+      "ChargeSeries": {
+        "properties": {
+          "charge_id": {
+            "type": "integer",
+            "title": "Charge Id"
+          },
+          "capability": {
+            "$ref": "#/components/schemas/Capability"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/TimeSeries"
+            },
+            "type": "array",
+            "title": "Series"
+          }
+        },
+        "type": "object",
+        "required": [
+          "charge_id",
+          "capability",
+          "series"
+        ],
+        "title": "ChargeSeries"
       },
       "ConfirmInput": {
         "properties": {
