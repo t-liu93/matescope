@@ -1,5 +1,6 @@
 import {
   Alert,
+  Badge,
   Button,
   Card,
   Container,
@@ -397,14 +398,32 @@ function TripRows({ items, timezone, historyPath, listPath }: { items: Trip[]; t
   </Fragment>)}</Stack>;
 }
 
-function DetailValues({ item, kind, timezone }: { item: Trip | Charge; kind: "trips" | "charges"; timezone: string }) {
+export function DetailValues({ item, kind, timezone, rangeBasis }: { item: Trip | Charge; kind: "trips" | "charges"; timezone: string; rangeBasis: "rated" | "ideal" }) {
   const { t } = useTranslation();
-  return <SimpleGrid cols={{ base: 1, sm: 2 }}>
+  if (kind === "charges") return <SimpleGrid cols={{ base: 1, sm: 2 }}>
     <Text>{t("start")}: {formatDate(item.start, timezone)}</Text>
     <Text>{t("end")}: {item.end ? formatDate(item.end, timezone) : t("unfinished")}</Text>
-    <Text>{t("duration")}: {value(item.duration_min, "min")}</Text>
-    {kind === "trips" ? <><Text>{t("distance")}: {value((item as Trip).distance_km, "km")}</Text><Text>{t("maxSpeed")}: {value((item as Trip).speed_max_kmh, "km/h")}</Text></> : <Text>{t("energyAdded")}: {value((item as Charge).energy_added_kwh, "kWh")}</Text>}
+    <Text>{t("duration")}: {duration(item.duration_min)}</Text>
+    <Text>{t("energyAdded")}: {value((item as Charge).energy_added_kwh, "kWh")}</Text>
   </SimpleGrid>;
+  const trip = item as Trip;
+  return <Stack gap="sm">
+    <Group justify="space-between" align="start" wrap="wrap">
+      <Text className="trip-detail-place"><span className="detail-label">{t("start")}</span> {trip.start_place ?? t("unknownLocation")}</Text>
+      <Text className="trip-detail-place"><span className="detail-label">{t("end")}</span> {trip.end_place ?? t("unknownLocation")}</Text>
+    </Group>
+    <SimpleGrid cols={{ base: 2, sm: 3 }} spacing="sm">
+      <Text>{t("date")}: {formatDate(item.start, timezone)}{item.end ? ` → ${formatDate(item.end, timezone)}` : ` · ${t("unfinished")}`}</Text>
+      <Text>{t("duration")}: {duration(item.duration_min)}</Text>
+      <Text>{t("distance")}: {value(trip.distance_km, "km")}</Text>
+      <Text>{t("soc")}: {whole(trip.start_battery_level)} → {whole(trip.end_battery_level)}</Text>
+      <Text>{t("maxSpeed")}: {value(trip.speed_max_kmh, "km/h")}</Text>
+      <div>
+        <Text component="span">{t("estimatedEnergy")}: {value(trip.estimated_energy_kwh, "kWh")} <Badge size="xs" variant="light">{t("estimated")}</Badge></Text>
+        <Text size="xs" c="dimmed">{t("estimatedEnergyBasis", { basis: t(`rangeBasis_${rangeBasis}`) })}</Text>
+      </div>
+    </SimpleGrid>
+  </Stack>;
 }
 
 function HistoryDetail({ kind }: { kind: "trips" | "charges" }) {
@@ -415,7 +434,7 @@ function HistoryDetail({ kind }: { kind: "trips" | "charges" }) {
   const identifier = Number(params.id);
   const settings = useHistorySettings();
   const online = useOnlineStatus();
-  const { setVehicleId, historyPath } = useHistoryContext();
+  const { setVehicleId, historyPath, vehicle } = useHistoryContext();
   const returnPath = typeof location.state === "object" && location.state !== null && "historyReturnPath" in location.state && typeof location.state.historyReturnPath === "string"
     ? location.state.historyReturnPath : null;
   const detail = useQuery<Trip | Charge>({
@@ -443,18 +462,26 @@ function HistoryDetail({ kind }: { kind: "trips" | "charges" }) {
   if (detail.error || !detail.data) return <Container py="xl"><HistoryFailure retry={() => void detail.refetch()} /></Container>;
   const item = detail.data;
   const timezone = settings.data.preferences.timezone;
+  const rangeBasis = settings.data.preferences.range_basis ?? "rated";
+  const vehicleLabel = vehicle?.name || vehicle?.model || `${t("vehicle")} #${item.vehicle_id}`;
   return <Container size="md" py="xl"><Stack gap="lg">
     <Button variant="subtle" onClick={() => returnPath ? navigate(-1) : navigate(historyPath(`/${kind}`, { includeCursor: true }))}>{kind === "trips" ? t("backToTrips") : t("backToCharges")}</Button>
     <Title order={1}>{kind === "trips" ? t("trip") : t("charge")}</Title>
+    <Group justify="space-between" align="start" wrap="wrap">
+      <Text size="sm" c="dimmed">{vehicleLabel} · #{item.vehicle_id}</Text>
+      <Text size="sm" c="dimmed">{formatDate(item.start, timezone)}</Text>
+    </Group>
     <Text size="sm" c="dimmed">{t("timesShownIn", { timezone })}</Text>
-    <Card withBorder radius="md"><DetailValues item={item} kind={kind} timezone={timezone} /></Card>
-    {kind === "trips" && <Card key={identifier} withBorder radius="md"><Stack><Title order={2}>{t("route")}</Title>
+    <div className={kind === "trips" ? "trip-detail-layout" : undefined}>
+      <Card withBorder radius="md"><Stack gap="sm"><Title order={2}>{t("summary")}</Title><DetailValues item={item} kind={kind} timezone={timezone} rangeBasis={rangeBasis} /></Stack></Card>
+      {kind === "trips" && <Card key={identifier} withBorder radius="md"><Stack><Title order={2}>{t("route")}</Title>
       {trajectory.isPending && <Text>{t("loadingMap")}</Text>}
       {(trajectory.error || mapModuleFailed || tileFailed) && <Alert color="yellow">{t("mapUnavailable")}</Alert>}
       {trajectory.data?.points.length === 0 && <Alert>{t("noTrajectory")}</Alert>}
       {trajectory.data && trajectory.data.points.length > 0 && !mapModuleFailed && <MapBoundary failed={() => setMapModuleFailed(true)}><Suspense fallback={<Text>{t("loadingMap")}</Text>}><TrajectoryMap points={groupTrajectory(trajectory.data.points)} tileUrl={settings.data.preferences.tile_url} onTileError={() => setTileFailed(true)} /></Suspense></MapBoundary>}
       {trajectory.data?.simplified && <Text size="sm" c="dimmed">{t("trajectorySimplified", { count: trajectory.data.total_points })}</Text>}
-    </Stack></Card>}
+      </Stack></Card>}
+    </div>
   </Stack></Container>;
 }
 

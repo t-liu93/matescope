@@ -2,7 +2,8 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { MantineProvider } from "@mantine/core";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { MetricCoverage } from "./history";
+import { DetailValues, MetricCoverage } from "./history";
+import type { components } from "./api/schema";
 import i18n from "./i18n";
 
 function renderCoverage(coverage: Parameters<typeof MetricCoverage>[0]["coverage"]) {
@@ -43,5 +44,30 @@ describe("MetricCoverage", () => {
     expect(screen.getByText("2 of 2 applicable records", { exact: true })).toBeVisible();
     rerender(<MantineProvider><MetricCoverage coverage={{ applicable_count: 2, valid_count: 1, reason: null }} t={i18n.t.bind(i18n)} /></MantineProvider>);
     expect(screen.getByText("1 of 2 applicable records", { exact: true })).toBeVisible();
+  });
+});
+
+describe("Trip detail summary", () => {
+  it("keeps full places and labels estimated energy with its range basis", () => {
+    const trip: components["schemas"]["Trip"] = {
+      id: 7,
+      vehicle_id: 3,
+      start: "2026-01-30T08:00:00Z",
+      end: "2026-01-30T09:30:00Z",
+      duration_min: 90,
+      distance_km: 42.5,
+      speed_max_kmh: 110,
+      start_place: "A very long starting place",
+      end_place: "A very long destination place",
+      start_battery_level: 80,
+      end_battery_level: 65,
+      estimated_energy_kwh: 8.4,
+      estimated_average_consumption_wh_per_km: 198,
+    };
+    render(<MantineProvider><DetailValues item={trip} kind="trips" timezone="UTC" rangeBasis="ideal" /></MantineProvider>);
+    expect(screen.getByText("A very long starting place", { exact: false })).toBeVisible();
+    expect(screen.getByText("A very long destination place", { exact: false })).toBeVisible();
+    expect(screen.getByText("Estimated", { exact: true })).toBeVisible();
+    expect(screen.getByText("Based on ideal range", { exact: true })).toBeVisible();
   });
 });

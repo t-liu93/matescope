@@ -206,8 +206,8 @@ async function mockHistoryApi(page: Page, options: MockOptions = {}) {
         : options.chargeItems ?? [{ id: 1, vehicle_id: 1, start: "2026-09-12T20:00:00Z", end: "2026-09-12T20:45:00Z", duration_min: 45, energy_added_kwh: 22.5, place: "SYNTHETIC Supercharger", start_battery_level: 20, end_battery_level: 60, cost: 0 }, { id: 2, vehicle_id: 1, start: "2026-09-13T20:00:00Z", end: null, duration_min: null, energy_added_kwh: null, place: null, start_battery_level: null, end_battery_level: null, cost: null }, { id: 3, vehicle_id: 1, start: "2026-09-11T20:00:00Z", end: "2026-09-11T20:45:00Z", duration_min: 45, energy_added_kwh: 10, place: "SYNTHETIC Supercharger", start_battery_level: 30, end_battery_level: 50, cost: 12.5 }];
       return route.fulfill({ json: { items, next_cursor: !options.empty && !request.searchParams.get("cursor") ? "cursor-1" : null, start: request.searchParams.get("start"), end: request.searchParams.get("end") } });
     }
-    if (/\/trips\/1$/.test(path)) return route.fulfill({ json: { id: 1, vehicle_id: 1, start: "2026-03-29T00:30:00Z", end: "2026-03-29T01:30:00Z", duration_min: 60, distance_km: 12.5, speed_max_kmh: 72 } });
-    if (/\/trips\/2$/.test(path)) return route.fulfill({ json: { id: 2, vehicle_id: 2, start: "2026-03-30T00:30:00Z", end: "2026-03-30T01:30:00Z", duration_min: 60, distance_km: 22, speed_max_kmh: 72 } });
+    if (/\/trips\/1$/.test(path)) return route.fulfill({ json: { id: 1, vehicle_id: 1, start: "2026-03-29T00:30:00Z", end: "2026-03-29T01:30:00Z", duration_min: 60, distance_km: 12.5, speed_max_kmh: 72, start_place: "SYNTHETIC Starting Place", end_place: "SYNTHETIC Destination Place", start_battery_level: 82, end_battery_level: 68, estimated_energy_kwh: 2.4, estimated_average_consumption_wh_per_km: 192 } });
+    if (/\/trips\/2$/.test(path)) return route.fulfill({ json: { id: 2, vehicle_id: 2, start: "2026-03-30T00:30:00Z", end: "2026-03-30T01:30:00Z", duration_min: 60, distance_km: 22, speed_max_kmh: 72, start_place: "SYNTHETIC Boreal Start", end_place: "SYNTHETIC Boreal End", start_battery_level: 77, end_battery_level: 60, estimated_energy_kwh: 4.1, estimated_average_consumption_wh_per_km: 186 } });
     if (/\/charges\/1$/.test(path)) return route.fulfill({ json: { id: 1, vehicle_id: 1, start: "2026-09-12T20:00:00Z", end: "2026-09-12T20:45:00Z", duration_min: 45, energy_added_kwh: 22.5 } });
     if (path.endsWith("/trajectory")) {
       if (options.trajectoryFailure) return route.fulfill({ status: 503, json: { detail: "unavailable" } });
@@ -245,6 +245,16 @@ test.describe("T09 calendar history filters", () => {
     await expect.poll(() => lists.at(-1)?.searchParams.get("vehicle_id")).toBe("1");
     await expect.poll(() => lists.at(-1)?.searchParams.get("cursor")).toBeNull();
     await page.locator('a[href^="/trips/1"]').click();
+    await expect(page.getByText("SYNTHETIC Atlas · #1", { exact: true })).toBeVisible();
+    await expect(page.getByText("SYNTHETIC Starting Place", { exact: false })).toBeVisible();
+    await expect(page.getByText("SYNTHETIC Destination Place", { exact: false })).toBeVisible();
+    await expect(page.getByText("82 → 68", { exact: false })).toBeVisible();
+    await expect(page.getByText("Estimated", { exact: true })).toBeVisible();
+    await expect(page.getByText("Based on rated range", { exact: true })).toBeVisible();
+    const detailLayout = page.locator(".trip-detail-layout");
+    await expect(detailLayout).toBeVisible();
+    const columns = await detailLayout.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length);
+    expect(columns).toBe(test.info().project.name === "desktop" ? 2 : 1);
     await expect(page.getByText(/12\.5 km/)).toBeVisible();
     await expect(page.getByLabel("Trip route map")).toBeVisible();
     await expect(page.locator("path.leaflet-interactive")).toHaveCount(2);
