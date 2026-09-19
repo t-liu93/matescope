@@ -871,6 +871,43 @@ test.describe("T29 charge power and SOC chart", () => {
   });
 });
 
+test.describe("T30 charge temperature More data", () => {
+  test("starts collapsed, renders outdoor temperature with real SVG gaps, and reports missing data locally", async ({ page }) => {
+    await mockHistoryApi(page, { chargeSeriesResponse: {
+      charge_id: 1, capability: { available: true, reason: null }, series: [
+        { name: "power", unit: "kW", start: "2026-09-12T20:00:00Z", end: "2026-09-12T20:45:00Z", sample_count: 1, bucket_count: 1, aggregation: "mean_min_max", capability: { available: true, reason: null }, points: [{ time: "2026-09-12T20:00:00Z", mean: 7, min: 7, max: 7, value: 7, discontinuity: false }] },
+        { name: "battery", unit: "%", start: "2026-09-12T20:00:00Z", end: "2026-09-12T20:45:00Z", sample_count: 1, bucket_count: 1, aggregation: "last", capability: { available: true, reason: null }, points: [{ time: "2026-09-12T20:00:00Z", value: 20, discontinuity: false }] },
+        { name: "outside_temperature", unit: "°C", start: "2026-09-12T20:00:00Z", end: "2026-09-12T20:45:00Z", sample_count: 3, bucket_count: 3, aggregation: "mean_min_max", capability: { available: true, reason: null }, points: [
+          { time: "2026-09-12T20:00:00Z", mean: 12, min: 11, max: 13, value: 12, discontinuity: false },
+          { time: "2026-09-12T20:15:00Z", mean: null, min: null, max: null, value: null, discontinuity: true },
+          { time: "2026-09-12T20:45:00Z", mean: 13, min: 12, max: 14, value: 13, discontinuity: false },
+        ] },
+      ],
+    } });
+    await page.goto("/charges/1?vehicle=1");
+    const moreData = page.locator("details.charge-more-data");
+    await expect(moreData).not.toHaveAttribute("open", "");
+    await moreData.locator("summary").first().click();
+    await expect(moreData.getByRole("heading", { name: "Outdoor temperature", exact: true })).toBeVisible();
+    const chart = moreData.getByRole("figure", { name: "Outdoor temperature" });
+    const line = chart.locator("path.recharts-line-curve");
+    await expect(line).toHaveCount(1);
+    const path = await line.getAttribute("d");
+    expect(path).toMatch(/\S/);
+    expect(path?.match(/M/g)?.length).toBeGreaterThanOrEqual(2);
+    await chart.getByText("Chart data table", { exact: true }).click();
+    await expect(chart.getByText(/Data gap/)).toBeVisible();
+
+    await page.unroute("**/api/v1/**");
+    await mockHistoryApi(page, { chargeSeriesResponse: { charge_id: 1, capability: { available: true, reason: null }, series: [] } });
+    await page.reload();
+    const missing = page.locator("details.charge-more-data");
+    await missing.locator("summary").first().click();
+    await expect(missing.getByRole("status").getByText("Outdoor temperature data is unavailable.", { exact: true })).toBeVisible();
+    await expect(missing.locator("path.recharts-line-curve")).toHaveCount(0);
+  });
+});
+
 test.describe("T10 visual foundations", () => {
   test("follows explicit light and dark themes with readable metric states", async ({ page }) => {
     await mockHistoryApi(page);

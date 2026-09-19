@@ -496,6 +496,21 @@ export function TripMoreData({ series, timezone }: { series: TripSeries["series"
   </details>;
 }
 
+export function ChargeMoreData({ series, timezone }: { series: ChargeSeries["series"]; timezone: string }) {
+  const { t } = useTranslation();
+  const outsideTemperature = series.find((item) => item.name === "outside_temperature");
+
+  return <details className="charge-more-data">
+    <summary>{t("chargeMoreData")}</summary>
+    <Card withBorder radius="sm"><Stack gap="sm">
+      <Title order={3}>{t("chargeOutsideTemperature")}</Title>
+      {outsideTemperature
+        ? <TimeSeriesChart series={outsideTemperature} timezone={timezone} title={t("chargeOutsideTemperature")} />
+        : <Alert color="yellow" role="status">{t("chargeOutsideTemperatureUnavailable")}</Alert>}
+    </Stack></Card>
+  </details>;
+}
+
 function HistoryDetail({ kind }: { kind: "trips" | "charges" }) {
   const { t } = useTranslation();
   const params = useParams();
@@ -591,7 +606,10 @@ function HistoryDetail({ kind }: { kind: "trips" | "charges" }) {
       {chargeSeries.data && (() => {
         const power = chargeSeries.data.series.find((series) => series.name === "power") ?? unavailableSeries("power", "kW");
         const battery = chargeSeries.data.series.find((series) => series.name === "battery") ?? unavailableSeries("battery", "%");
-        return <DualTimeSeriesChart first={power} second={battery} timezone={timezone} title={t("chargePowerSoc")} firstTitle={t("power")} secondTitle={t("soc")} />;
+        return <>
+          <DualTimeSeriesChart first={power} second={battery} timezone={timezone} title={t("chargePowerSoc")} firstTitle={t("power")} secondTitle={t("soc")} />
+          <ChargeMoreData series={chargeSeries.data.series} timezone={timezone} />
+        </>;
       })()}
     </Stack></Card>}
   </Stack></Container>;

@@ -2,7 +2,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { MantineProvider } from "@mantine/core";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { ChargeDetailValues, DetailValues, MetricCoverage, TripMoreData } from "./history";
+import { ChargeDetailValues, ChargeMoreData, DetailValues, MetricCoverage, TripMoreData } from "./history";
 import type { components } from "./api/schema";
 import i18n from "./i18n";
 
@@ -140,5 +140,40 @@ describe("Trip more data", () => {
     details?.setAttribute("open", "");
     expect(screen.getByText("Inside temperature data is unavailable.", { exact: true })).toBeVisible();
     expect(screen.getByText("Elevation data is unavailable.", { exact: true })).toBeVisible();
+  });
+});
+
+describe("Charge more data", () => {
+  const series = (name: components["schemas"]["SeriesName"], unit: string): components["schemas"]["TimeSeries"] => ({
+    name,
+    unit,
+    start: "2026-01-30T08:00:00Z",
+    end: "2026-01-30T08:06:00Z",
+    aggregation: "mean_min_max",
+    sample_count: 2,
+    bucket_count: 2,
+    capability: { available: true, reason: null },
+    points: [
+      { time: "2026-01-30T08:00:00Z", mean: 12, min: 11, max: 13, value: null, discontinuity: false },
+      { time: "2026-01-30T08:06:00Z", mean: null, min: null, max: null, value: null, discontinuity: true },
+    ],
+  });
+
+  it("starts collapsed and shows outdoor temperature without bridging a gap", () => {
+    render(<MantineProvider><ChargeMoreData series={[series("outside_temperature", "°C")]} timezone="UTC" /></MantineProvider>);
+    const details = screen.getByText("More data", { exact: true }).closest("details");
+    expect(details).not.toBeNull();
+    expect(details).not.toHaveAttribute("open");
+    details?.setAttribute("open", "");
+    expect(screen.getAllByText("Outdoor temperature", { exact: true }).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Values use °C/)).toBeVisible();
+    expect(screen.getByRole("table").textContent).toContain("Data gap: —");
+  });
+
+  it("keeps missing outdoor temperature local", () => {
+    render(<MantineProvider><ChargeMoreData series={[]} timezone="UTC" /></MantineProvider>);
+    const details = screen.getByText("More data", { exact: true }).closest("details");
+    details?.setAttribute("open", "");
+    expect(screen.getByText("Outdoor temperature data is unavailable.", { exact: true })).toBeVisible();
   });
 });
