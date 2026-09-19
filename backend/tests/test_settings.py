@@ -238,6 +238,7 @@ def test_postgresql_test_auth_csrf_and_unconfigured(client: TestClient) -> None:
     assert client.get("/api/v1/diagnostics").status_code == 401
     for path in (
         "vehicles",
+        "vehicles/1/snapshot",
         "trips",
         "trips/1",
         "trips/1/trajectory",

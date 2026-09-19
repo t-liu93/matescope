@@ -166,6 +166,24 @@ class HistoryCapabilities(BaseModel):
     capabilities: dict[str, Capability]
 
 
+class VehicleSnapshot(BaseModel):
+    """Latest independently-recorded values; timestamps are never combined."""
+
+    vehicle_id: int
+    battery_level: int | None
+    battery_level_at: datetime | None
+    range_km: float | None
+    range_at: datetime | None
+    odometer_km: float | None
+    odometer_at: datetime | None
+    capability: Capability
+
+    @field_validator("battery_level_at", "range_at", "odometer_at")
+    @classmethod
+    def utc(cls, value: datetime | None) -> datetime | None:
+        return value.replace(tzinfo=UTC) if value and value.tzinfo is None else value
+
+
 class SeriesPoint(BaseModel):
     """One raw sample or one equal-width aggregate bucket."""
 
@@ -333,6 +351,100 @@ def resolve_calendar_window(
 def vehicle_exists(database: psycopg.Connection[dict[str, Any]], vehicle_id: int) -> bool:
     row = database.execute("SELECT 1 FROM public.cars WHERE id=%s", (vehicle_id,)).fetchone()
     return row is not None
+
+
+def latest_snapshot_value(
+    database: psycopg.Connection[dict[str, Any]],
+    vehicle_id: int,
+    column: Literal[
+        "battery_level", "rated_battery_range_km", "ideal_battery_range_km", "odometer"
+    ],
+) -> dict[str, Any] | None:
+    """Read one field from its latest valid source row.
+
+    The column is an internal literal, never a request value.  Charge samples
+    deliberately win only when their timestamp equals a position timestamp;
+    IDs break ties inside each source independently.
+    """
+    if column == "battery_level":
+        valid_position = "p.battery_level BETWEEN 0 AND 100"
+        valid_charge = "ch.battery_level BETWEEN 0 AND 100"
+    else:
+        valid_position = (
+            f"p.{column} IS NOT NULL AND p.{column}::text NOT IN ('NaN', 'Infinity', '-Infinity') "
+            f"AND p.{column} >= 0"
+        )
+        valid_charge = (
+            f"ch.{column} IS NOT NULL AND ch.{column}::text "
+            "NOT IN ('NaN', 'Infinity', '-Infinity') "
+            f"AND ch.{column} >= 0"
+        )
+    # Odometer is only recorded in positions.  The other values merge the two
+    # real source streams, preserving each selected row's actual timestamp.
+    if column == "odometer":
+        return database.execute(
+            "SELECT p.odometer AS value,p.date AS recorded_at FROM public.positions AS p "
+            f"WHERE p.car_id=%s AND {valid_position} ORDER BY p.date DESC,p.id DESC LIMIT 1",
+            (vehicle_id,),
+        ).fetchone()
+    return database.execute(
+        "WITH samples AS ("
+        f"SELECT p.{column} AS value,p.date AS recorded_at,p.id AS source_id,0 AS source_priority "
+        "FROM public.positions AS p "
+        f"WHERE p.car_id=%s AND {valid_position} "
+        "UNION ALL "
+        f"SELECT ch.{column} AS value,ch.date AS recorded_at,ch.id AS source_id,"
+        "1 AS source_priority "
+        "FROM public.charges AS ch JOIN public.charging_processes AS cp "
+        "ON cp.id=ch.charging_process_id "
+        f"WHERE cp.car_id=%s AND {valid_charge}"
+        ") SELECT value,recorded_at FROM samples "
+        "ORDER BY recorded_at DESC,source_priority DESC,source_id DESC LIMIT 1",
+        (vehicle_id, vehicle_id),
+    ).fetchone()
+
+
+@router.get("/vehicles/{vehicle_id}/snapshot", response_model=VehicleSnapshot)
+def vehicle_snapshot(
+    request: Request, vehicle_id: Annotated[int, Path(ge=1)]
+) -> VehicleSnapshot:
+    """Return latest recorded values, independent of any history window."""
+    with Session(storage(request).engine) as session:
+        range_basis = read_settings(session).preferences.range_basis
+    with connection(request) as database:
+        if not vehicle_exists(database, vehicle_id):
+            raise HTTPException(404, "Vehicle not found")
+        reason = capability_status(database)["latest_values"]
+        capability = Capability(available=reason is None, reason=reason)
+        if reason is not None:
+            return VehicleSnapshot(
+                vehicle_id=vehicle_id,
+                battery_level=None,
+                battery_level_at=None,
+                range_km=None,
+                range_at=None,
+                odometer_km=None,
+                odometer_at=None,
+                capability=capability,
+            )
+        battery = latest_snapshot_value(database, vehicle_id, "battery_level")
+        range_column: Literal["rated_battery_range_km", "ideal_battery_range_km"] = (
+            "rated_battery_range_km"
+            if range_basis == "rated"
+            else "ideal_battery_range_km"
+        )
+        range_value = latest_snapshot_value(database, vehicle_id, range_column)
+        odometer = latest_snapshot_value(database, vehicle_id, "odometer")
+    return VehicleSnapshot(
+        vehicle_id=vehicle_id,
+        battery_level=int(battery["value"]) if battery else None,
+        battery_level_at=battery["recorded_at"] if battery else None,
+        range_km=float(range_value["value"]) if range_value else None,
+        range_at=range_value["recorded_at"] if range_value else None,
+        odometer_km=float(odometer["value"]) if odometer else None,
+        odometer_at=odometer["recorded_at"] if odometer else None,
+        capability=capability,
+    )
 
 
 @router.get("/vehicles/{vehicle_id}/history-window", response_model=ResolvedHistoryWindow)

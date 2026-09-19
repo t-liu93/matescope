@@ -397,6 +397,124 @@ def test_history_capabilities_keep_legacy_history_available(
     assert client.get("/api/v1/trips").status_code == 200
 
 
+@contextmanager
+def snapshot_fixture(admin: psycopg.Connection[Any]) -> Iterator[None]:
+    """Create isolated latest-value rows and remove exactly those rows."""
+    car_id = 96
+    process_id = 9696
+    position_ids = (960001, 960002, 960003, 960004)
+    charge_ids = (969601, 969602, 969603, 969604)
+    assert not admin.execute("SELECT 1 FROM public.cars WHERE id=%s", (car_id,)).fetchall()
+    assert not admin.execute(
+        "SELECT 1 FROM public.charging_processes WHERE id=%s", (process_id,)
+    ).fetchall()
+    assert not admin.execute(
+        "SELECT 1 FROM public.positions WHERE id = ANY(%s)", (list(position_ids),)
+    ).fetchall()
+    assert not admin.execute(
+        "SELECT 1 FROM public.charges WHERE id = ANY(%s)", (list(charge_ids),)
+    ).fetchall()
+    created_car = created_process = False
+    try:
+        admin.execute("INSERT INTO public.cars (id,name,model) VALUES (96,'SNAPSHOT',NULL)")
+        created_car = True
+        admin.execute(
+            "INSERT INTO public.charging_processes "
+            "(id,car_id,start_date,end_date,charge_energy_added,duration_min) "
+            "VALUES (9696,96,TIMESTAMP '2025-04-01 00:00:00',NULL,NULL,NULL)"
+        )
+        created_process = True
+        admin.execute(
+            "INSERT INTO public.positions "
+            "(id,car_id,drive_id,date,latitude,longitude,odometer,battery_level,"
+            "rated_battery_range_km,ideal_battery_range_km) VALUES "
+            "(960001,96,NULL,TIMESTAMP '2025-04-01 01:00:00',0,0,100,70,200,220),"
+            "(960002,96,NULL,TIMESTAMP '2025-04-01 02:00:00',0,0,101,71,201,221),"
+            "(960003,96,NULL,TIMESTAMP '2025-04-01 02:00:00',0,0,102,72,-1,222),"
+            "(960004,96,NULL,TIMESTAMP '2025-04-01 03:00:00',0,0,-1,101,250,270)"
+        )
+        admin.execute(
+            "INSERT INTO public.charges "
+            "(id,charging_process_id,date,battery_level,rated_battery_range_km,"
+            "ideal_battery_range_km) VALUES "
+            "(969601,9696,TIMESTAMP '2025-04-01 02:00:00',80,180,230),"
+            "(969602,9696,TIMESTAMP '2025-04-01 02:00:00',81,181,231),"
+            "(969603,9696,TIMESTAMP '2025-04-01 03:00:00',NULL,190,240),"
+            "(969604,9696,TIMESTAMP '2025-04-01 04:00:00',102,-2,NULL)"
+        )
+        yield
+    finally:
+        if created_process:
+            deleted = admin.execute(
+                "DELETE FROM public.charges WHERE charging_process_id=%s RETURNING id",
+                (process_id,),
+            ).fetchall()
+            assert {row[0] for row in deleted} == set(charge_ids)
+            assert admin.execute(
+                "DELETE FROM public.charging_processes WHERE id=%s RETURNING id", (process_id,)
+            ).fetchall() == [(process_id,)]
+        if created_car:
+            deleted = admin.execute(
+                "DELETE FROM public.positions WHERE car_id=%s RETURNING id", (car_id,)
+            ).fetchall()
+            assert {row[0] for row in deleted} == set(position_ids)
+            deleted = admin.execute(
+                "DELETE FROM public.cars WHERE id=%s RETURNING id", (car_id,)
+            ).fetchall()
+            assert deleted == [(car_id,)]
+
+
+def test_vehicle_snapshot_uses_independent_latest_valid_sources_and_basis(
+    client: TestClient, admin: psycopg.Connection[Any]
+) -> None:
+    with snapshot_fixture(admin), optional_grants(admin):
+        rated = client.get("/api/v1/vehicles/96/snapshot")
+        assert rated.status_code == 200, rated.text
+        assert rated.headers["cache-control"] == "no-store"
+        assert rated.json() == {
+            "vehicle_id": 96,
+            # Charge wins a cross-source timestamp tie; its own ID breaks its tie.
+            "battery_level": 81,
+            "battery_level_at": "2025-04-01T02:00:00Z",
+            "range_km": 190.0,
+            "range_at": "2025-04-01T03:00:00Z",
+            # Odometer has no charge source and rejects the later negative sample.
+            "odometer_km": 102.0,
+            "odometer_at": "2025-04-01T02:00:00Z",
+            "capability": {"available": True, "reason": None},
+        }
+        save(client, "preferences", {"range_basis": "ideal"})
+        ideal = client.get("/api/v1/vehicles/96/snapshot")
+        assert ideal.status_code == 200, ideal.text
+        assert ideal.json()["range_km"] == 240.0
+        assert ideal.json()["range_at"] == "2025-04-01T03:00:00Z"
+
+
+def test_vehicle_snapshot_is_local_when_optional_columns_are_unreadable(
+    client: TestClient,
+) -> None:
+    response = client.get("/api/v1/vehicles/1/snapshot")
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result == {
+        "vehicle_id": 1,
+        "battery_level": None,
+        "battery_level_at": None,
+        "range_km": None,
+        "range_at": None,
+        "odometer_km": None,
+        "odometer_at": None,
+        "capability": {"available": False, "reason": "insufficient_permissions"},
+    }
+
+
+def test_vehicle_snapshot_rejects_unknown_vehicle(
+    client: TestClient, admin: psycopg.Connection[Any]
+) -> None:
+    with optional_grants(admin):
+        assert client.get("/api/v1/vehicles/999999/snapshot").status_code == 404
+
+
 def test_trip_places_and_soc_require_only_checked_optional_columns(
     client: TestClient, admin: psycopg.Connection[Any]
 ) -> None:

@@ -819,6 +819,50 @@
         }
       }
     },
+    "/api/v1/vehicles/{vehicle_id}/snapshot": {
+      "get": {
+        "tags": [
+          "history"
+        ],
+        "summary": "Vehicle Snapshot",
+        "description": "Return latest recorded values, independent of any history window.",
+        "operationId": "vehicle_snapshot_api_v1_vehicles__vehicle_id__snapshot_get",
+        "parameters": [
+          {
+            "name": "vehicle_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Vehicle Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VehicleSnapshot"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/vehicles/{vehicle_id}/history-window": {
       "get": {
         "tags": [
@@ -3887,6 +3931,99 @@
           "model"
         ],
         "title": "Vehicle"
+      },
+      "VehicleSnapshot": {
+        "properties": {
+          "vehicle_id": {
+            "type": "integer",
+            "title": "Vehicle Id"
+          },
+          "battery_level": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Battery Level"
+          },
+          "battery_level_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Battery Level At"
+          },
+          "range_km": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Range Km"
+          },
+          "range_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Range At"
+          },
+          "odometer_km": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Odometer Km"
+          },
+          "odometer_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Odometer At"
+          },
+          "capability": {
+            "$ref": "#/components/schemas/Capability"
+          }
+        },
+        "type": "object",
+        "required": [
+          "vehicle_id",
+          "battery_level",
+          "battery_level_at",
+          "range_km",
+          "range_at",
+          "odometer_km",
+          "odometer_at",
+          "capability"
+        ],
+        "title": "VehicleSnapshot",
+        "description": "Latest independently-recorded values; timestamps are never combined."
       },
       "Vehicles": {
         "properties": {

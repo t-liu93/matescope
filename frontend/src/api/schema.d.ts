@@ -446,6 +446,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/vehicles/{vehicle_id}/snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Vehicle Snapshot
+         * @description Return latest recorded values, independent of any history window.
+         */
+        get: operations["vehicle_snapshot_api_v1_vehicles__vehicle_id__snapshot_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/vehicles/{vehicle_id}/history-window": {
         parameters: {
             query?: never;
@@ -1674,6 +1694,27 @@ export interface components {
             /** Model */
             model: string | null;
         };
+        /**
+         * VehicleSnapshot
+         * @description Latest independently-recorded values; timestamps are never combined.
+         */
+        VehicleSnapshot: {
+            /** Vehicle Id */
+            vehicle_id: number;
+            /** Battery Level */
+            battery_level: number | null;
+            /** Battery Level At */
+            battery_level_at: string | null;
+            /** Range Km */
+            range_km: number | null;
+            /** Range At */
+            range_at: string | null;
+            /** Odometer Km */
+            odometer_km: number | null;
+            /** Odometer At */
+            odometer_at: string | null;
+            capability: components["schemas"]["Capability"];
+        };
         /** Vehicles */
         Vehicles: {
             /** Items */
@@ -2378,6 +2419,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Vehicles"];
+                };
+            };
+        };
+    };
+    vehicle_snapshot_api_v1_vehicles__vehicle_id__snapshot_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                vehicle_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VehicleSnapshot"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
