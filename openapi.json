@@ -980,6 +980,70 @@
         }
       }
     },
+    "/api/v1/vehicles/{vehicle_id}/charge-summary": {
+      "get": {
+        "tags": [
+          "history"
+        ],
+        "summary": "Charge Summary",
+        "description": "Aggregate one vehicle's complete UTC interval without loading charge rows.",
+        "operationId": "charge_summary_api_v1_vehicles__vehicle_id__charge_summary_get",
+        "parameters": [
+          {
+            "name": "vehicle_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Vehicle Id"
+            }
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "title": "Start"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "title": "End"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChargePeriodSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/trips": {
       "get": {
         "tags": [
@@ -1658,6 +1722,125 @@
           "end"
         ],
         "title": "ChargePage"
+      },
+      "ChargePeriodSummary": {
+        "properties": {
+          "vehicle_id": {
+            "type": "integer",
+            "title": "Vehicle Id"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "End"
+          },
+          "total_count": {
+            "type": "integer",
+            "title": "Total Count"
+          },
+          "ended_count": {
+            "type": "integer",
+            "title": "Ended Count"
+          },
+          "not_ended_count": {
+            "type": "integer",
+            "title": "Not Ended Count"
+          },
+          "energy_added_kwh": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Energy Added Kwh"
+          },
+          "duration_min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Min"
+          },
+          "cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "AUD",
+                  "CAD",
+                  "CHF",
+                  "CNY",
+                  "DKK",
+                  "EUR",
+                  "GBP",
+                  "JPY",
+                  "NOK",
+                  "NZD",
+                  "PLN",
+                  "SEK",
+                  "USD"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "energy_added_coverage": {
+            "$ref": "#/components/schemas/MetricCoverage"
+          },
+          "duration_coverage": {
+            "$ref": "#/components/schemas/MetricCoverage"
+          },
+          "cost_coverage": {
+            "$ref": "#/components/schemas/MetricCoverage"
+          },
+          "cost_capability": {
+            "$ref": "#/components/schemas/Capability"
+          }
+        },
+        "type": "object",
+        "required": [
+          "vehicle_id",
+          "start",
+          "end",
+          "total_count",
+          "ended_count",
+          "not_ended_count",
+          "energy_added_kwh",
+          "duration_min",
+          "cost",
+          "currency",
+          "energy_added_coverage",
+          "duration_coverage",
+          "cost_coverage",
+          "cost_capability"
+        ],
+        "title": "ChargePeriodSummary"
       },
       "ConfirmInput": {
         "properties": {

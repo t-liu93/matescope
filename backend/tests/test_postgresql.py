@@ -225,6 +225,66 @@ def trip_summary_fixture(admin: psycopg.Connection[Any]) -> Iterator[None]:
         ).fetchall() == original_drives
 
 
+@contextmanager
+def charge_summary_fixture(admin: psycopg.Connection[Any]) -> Iterator[None]:
+    """Create and precisely remove the rows used by the T17 aggregate test."""
+    car_id = 98
+    charge_ids = (9811, 9812, 9813, 9814, 9815, 9816)
+    created_car = False
+    created_charges = False
+    original_cars: list[Any] = []
+    original_charges: list[Any] = []
+    try:
+        original_cars = admin.execute(
+            "SELECT * FROM public.cars WHERE id=%s", (car_id,)
+        ).fetchall()
+        original_charges = admin.execute(
+            "SELECT * FROM public.charging_processes WHERE id = ANY(%s) ORDER BY id",
+            (list(charge_ids),),
+        ).fetchall()
+        assert not original_cars and not original_charges, "T17 fixture identifiers must be unused"
+
+        admin.execute("INSERT INTO public.cars (id,name,model) VALUES (98,'CHARGE SUMMARY',NULL)")
+        created_car = True
+        admin.execute(
+            "INSERT INTO public.charging_processes "
+            "(id,car_id,start_date,end_date,charge_energy_added,duration_min,cost) VALUES "
+            "(9811,98,TIMESTAMP '2025-01-01 00:00:00',"
+            "TIMESTAMP '2025-01-01 00:30:00',10,30,12.5),"
+            "(9812,98,TIMESTAMP '2025-01-02 00:00:00',"
+            "TIMESTAMP '2025-01-02 00:00:00',0,0,0),"
+            "(9813,98,TIMESTAMP '2025-01-03 00:00:00',"
+            "TIMESTAMP '2025-01-03 00:10:00',-3,-2,NULL),"
+            "(9814,98,TIMESTAMP '2025-01-04 00:00:00',NULL,20,15,5),"
+            "(9815,98,TIMESTAMP '2025-01-05 00:00:00',"
+            "TIMESTAMP '2025-01-05 00:10:00',NULL,NULL,NULL),"
+            "(9816,98,TIMESTAMP '2025-02-01 00:00:00',"
+            "TIMESTAMP '2025-02-01 00:10:00',99,99,99)"
+        )
+        created_charges = True
+        yield
+    finally:
+        if created_charges:
+            deleted_charges = admin.execute(
+                "DELETE FROM public.charging_processes WHERE car_id=%s "
+                "AND id = ANY(%s) RETURNING id",
+                (car_id, list(charge_ids)),
+            ).fetchall()
+            assert {row[0] for row in deleted_charges} == set(charge_ids)
+        if created_car:
+            deleted_cars = admin.execute(
+                "DELETE FROM public.cars WHERE id=%s RETURNING id", (car_id,)
+            ).fetchall()
+            assert deleted_cars == [(car_id,)]
+        assert admin.execute(
+            "SELECT * FROM public.cars WHERE id=%s", (car_id,)
+        ).fetchall() == original_cars
+        assert admin.execute(
+            "SELECT * FROM public.charging_processes WHERE id = ANY(%s) ORDER BY id",
+            (list(charge_ids),),
+        ).fetchall() == original_charges
+
+
 def test_synthetic_sql_and_readonly(client: TestClient, pgconfig: PostgreSQLResponse) -> None:
     assert check(client)["code"] == "ok"
     current = client.get("/api/v1/settings").json()["postgresql"]
@@ -607,6 +667,132 @@ def test_trip_period_summary_aggregates_full_window_and_reports_coverage(
             assert other_vehicle["total_count"] == 0
 
 
+def test_charge_period_summary_aggregates_full_window_and_reports_cost_coverage(
+    client: TestClient, admin: psycopg.Connection[Any]
+) -> None:
+    """T17 keeps provisional and unknown charges out of aggregate totals."""
+    params = {
+        "start": "2025-01-01T00:00:00Z",
+        "end": "2025-02-01T00:00:00Z",
+    }
+    with charge_summary_fixture(admin):
+        legacy = client.get("/api/v1/vehicles/98/charge-summary", params=params)
+        assert legacy.status_code == 200, legacy.text
+        assert legacy.json()["cost_capability"] == {
+            "available": False,
+            "reason": "insufficient_permissions",
+        }
+        assert legacy.json()["energy_added_kwh"] == 10
+        assert legacy.json()["cost"] is None
+        assert legacy.json()["cost_coverage"] == {
+            "applicable_count": 4,
+            "valid_count": 0,
+            "reason": "unavailable",
+        }
+
+        with column_select_grant(admin, "charging_processes", "cost"):
+            unset = client.get("/api/v1/vehicles/98/charge-summary", params=params)
+            assert unset.status_code == 200, unset.text
+            result = unset.json()
+            assert {
+                key: result[key]
+                for key in (
+                    "total_count",
+                    "ended_count",
+                    "not_ended_count",
+                    "energy_added_kwh",
+                    "duration_min",
+                    "cost",
+                    "currency",
+                )
+            } == {
+                "total_count": 5,
+                "ended_count": 4,
+                "not_ended_count": 1,
+                "energy_added_kwh": 10,
+                "duration_min": 30,
+                "cost": None,
+                "currency": None,
+            }
+            assert result["energy_added_coverage"] == {
+                "applicable_count": 4,
+                "valid_count": 2,
+                "reason": None,
+            }
+            assert result["duration_coverage"] == result["energy_added_coverage"]
+            assert result["cost_coverage"] == {
+                "applicable_count": 4,
+                "valid_count": 2,
+                "reason": None,
+            }
+            assert result["cost_capability"] == {"available": True, "reason": None}
+
+            save(client, "preferences", {"display_currency": "EUR"})
+            configured = client.get("/api/v1/vehicles/98/charge-summary", params=params).json()
+            assert configured["cost"] == 12.5
+            assert configured["currency"] == "EUR"
+
+            # Start ownership and half-open bounds exclude the Feb 1 row.
+            boundary = client.get(
+                "/api/v1/vehicles/98/charge-summary",
+                params={"start": "2025-02-01T00:00:00Z", "end": "2025-02-02T00:00:00Z"},
+            ).json()
+            assert boundary["total_count"] == boundary["ended_count"] == 1
+            assert (
+                boundary["energy_added_kwh"] == boundary["duration_min"] == boundary["cost"] == 99
+            )
+
+            empty = client.get(
+                "/api/v1/vehicles/98/charge-summary",
+                params={"start": "2024-01-01T00:00:00Z", "end": "2024-02-01T00:00:00Z"},
+            ).json()
+            assert empty["total_count"] == empty["ended_count"] == empty["not_ended_count"] == 0
+            assert empty["energy_added_kwh"] == empty["duration_min"] == empty["cost"] == 0
+            assert all(
+                value["reason"] is None
+                for key, value in empty.items()
+                if key.endswith("_coverage")
+            )
+
+            missing = client.get(
+                "/api/v1/vehicles/98/charge-summary",
+                params={"start": "2025-01-05T00:00:00Z", "end": "2025-01-06T00:00:00Z"},
+            ).json()
+            assert missing["energy_added_kwh"] is None
+            assert missing["cost"] is None
+            assert missing["energy_added_coverage"] == missing["cost_coverage"] == {
+                "applicable_count": 1,
+                "valid_count": 0,
+                "reason": "no_valid_values",
+            }
+
+            unfinished = client.get(
+                "/api/v1/vehicles/98/charge-summary",
+                params={"start": "2025-01-04T00:00:00Z", "end": "2025-01-05T00:00:00Z"},
+            ).json()
+            assert unfinished["energy_added_kwh"] is None
+            assert unfinished["energy_added_coverage"] == {
+                "applicable_count": 0,
+                "valid_count": 0,
+                "reason": "no_ended_records",
+            }
+            other_vehicle = client.get("/api/v1/vehicles/1/charge-summary", params=params).json()
+            assert other_vehicle["total_count"] == 0
+
+
+def test_charge_summary_timeout_is_an_error(
+    client: TestClient, admin: psycopg.Connection[Any]
+) -> None:
+    with admin.transaction():
+        admin.execute("LOCK public.charging_processes IN ACCESS EXCLUSIVE MODE")
+        response = client.get(
+            "/api/v1/vehicles/1/charge-summary",
+            params={"start": "2025-01-01T00:00:00Z", "end": "2025-02-01T00:00:00Z"},
+        )
+        assert response.status_code == 503
+        assert response.json() == {"detail": {"code": "timeout"}}
+
+
 def test_optional_grants_preserves_existing_column_permissions(
     admin: psycopg.Connection[Any],
 ) -> None:
@@ -650,6 +836,46 @@ def test_trip_summary_fixture_cleans_up_after_setup_interruption(
         assert admin.execute("SELECT count(*) FROM public.cars WHERE id=97").fetchone()[0] == 0
         assert (
             admin.execute("SELECT count(*) FROM public.drives WHERE car_id=97").fetchone()[0] == 0
+        )
+
+
+def test_charge_summary_fixture_refuses_existing_rows(admin: psycopg.Connection[Any]) -> None:
+    with mutation(
+        admin,
+        "INSERT INTO public.cars (id,name,model) VALUES (98,'RETAINED',NULL)",
+        "DELETE FROM public.cars WHERE id=98",
+    ):
+        with pytest.raises(AssertionError, match="fixture identifiers must be unused"):
+            with charge_summary_fixture(admin):
+                pass
+        retained = admin.execute("SELECT name FROM public.cars WHERE id=98").fetchone()
+        assert retained == ("RETAINED",)
+        assert (
+            admin.execute(
+                "SELECT count(*) FROM public.charging_processes WHERE car_id=98"
+            ).fetchone()[0]
+            == 0
+        )
+
+
+def test_charge_summary_fixture_cleans_up_after_setup_interruption(
+    admin: psycopg.Connection[Any],
+) -> None:
+    with mutation(
+        admin,
+        "ALTER TABLE public.charging_processes ADD CONSTRAINT "
+        "t17_fixture_setup_interrupt CHECK (id <> 9811)",
+        "ALTER TABLE public.charging_processes DROP CONSTRAINT t17_fixture_setup_interrupt",
+    ):
+        with pytest.raises(psycopg.errors.CheckViolation):
+            with charge_summary_fixture(admin):
+                pass
+        assert admin.execute("SELECT count(*) FROM public.cars WHERE id=98").fetchone()[0] == 0
+        assert (
+            admin.execute(
+                "SELECT count(*) FROM public.charging_processes WHERE car_id=98"
+            ).fetchone()[0]
+            == 0
         )
 
 

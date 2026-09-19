@@ -74,6 +74,12 @@ CAPABILITY_COLUMNS: dict[str, dict[str, tuple[str, ...]]] = {
             "cost",
         ),
     },
+    # A period cost total needs only the raw cost column.  Keep it separate
+    # from charge details so an old minimally privileged role can still use
+    # charge counts, added energy, and duration.
+    "charge_summary": {
+        "charging_processes": ("cost",),
+    },
     "locations": {
         "addresses": ("id", "name", "road", "house_number", "city"),
         "geofences": ("id", "name"),

@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from .auth import require_admin, storage
 from .postgresql import CapabilityReason, capability_status, classify, snapshot
-from .settings import MQTTResponse, PostgreSQLResponse, SMTPResponse, read_settings
+from .settings import Currency, MQTTResponse, PostgreSQLResponse, SMTPResponse, read_settings
 
 router = APIRouter(prefix="/api/v1", tags=["history"], dependencies=[Depends(require_admin)])
 
@@ -133,6 +133,28 @@ class TripPeriodSummary(BaseModel):
     estimated_energy_coverage: MetricCoverage
     estimated_average_consumption_coverage: MetricCoverage
     estimate_capability: Capability
+
+    @field_validator("start", "end")
+    @classmethod
+    def utc(cls, value: datetime) -> datetime:
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value
+
+
+class ChargePeriodSummary(BaseModel):
+    vehicle_id: int
+    start: datetime
+    end: datetime
+    total_count: int
+    ended_count: int
+    not_ended_count: int
+    energy_added_kwh: float | None
+    duration_min: float | None
+    cost: float | None
+    currency: Currency | None
+    energy_added_coverage: MetricCoverage
+    duration_coverage: MetricCoverage
+    cost_coverage: MetricCoverage
+    cost_capability: Capability
 
     @field_validator("start", "end")
     @classmethod
@@ -552,6 +574,100 @@ def trip_summary(
         estimated_average_consumption_coverage=consumption_coverage,
         estimate_capability=Capability(
             available=estimate_available, reason=capabilities["trip_summary"]
+        ),
+    )
+
+
+@router.get("/vehicles/{vehicle_id}/charge-summary", response_model=ChargePeriodSummary)
+def charge_summary(
+    request: Request,
+    vehicle_id: Annotated[int, Path(ge=1)],
+    start: datetime,
+    end: datetime,
+) -> ChargePeriodSummary:
+    """Aggregate one vehicle's complete UTC interval without loading charge rows."""
+    start, end = period_window(start, end)
+    with Session(storage(request).engine) as session:
+        currency = read_settings(session).preferences.display_currency
+    with connection(request) as database:
+        if not vehicle_exists(database, vehicle_id):
+            raise HTTPException(404, "Vehicle not found")
+        capabilities = capability_status(database)
+        cost_available = capabilities["charge_summary"] is None
+        finite_energy = "c.charge_energy_added::text NOT IN ('NaN', 'Infinity', '-Infinity')"
+        finite_duration = "c.duration_min::text NOT IN ('NaN', 'Infinity', '-Infinity')"
+        valid_energy = (
+            "c.end_date IS NOT NULL AND c.charge_energy_added IS NOT NULL "
+            f"AND {finite_energy} AND c.charge_energy_added >= 0"
+        )
+        valid_duration = (
+            "c.end_date IS NOT NULL AND c.duration_min IS NOT NULL "
+            f"AND {finite_duration} AND c.duration_min >= 0"
+        )
+        if cost_available:
+            finite_cost = "c.cost::text NOT IN ('NaN', 'Infinity', '-Infinity')"
+            valid_cost = (
+                "c.end_date IS NOT NULL AND c.cost IS NOT NULL " f"AND {finite_cost}"
+            )
+            cost_fields = (
+                f"count(*) FILTER (WHERE {valid_cost}) AS cost_valid_count, "
+                f"sum(c.cost) FILTER (WHERE {valid_cost}) AS cost"
+            )
+        else:
+            cost_fields = "0 AS cost_valid_count, NULL::numeric AS cost"
+        row = database.execute(
+            f"SELECT count(*) AS total_count, "
+            "count(*) FILTER (WHERE c.end_date IS NOT NULL) AS ended_count, "
+            "count(*) FILTER (WHERE c.end_date IS NULL) AS not_ended_count, "
+            f"count(*) FILTER (WHERE {valid_energy}) AS energy_valid_count, "
+            f"sum(c.charge_energy_added) FILTER (WHERE {valid_energy}) AS energy_added_kwh, "
+            f"count(*) FILTER (WHERE {valid_duration}) AS duration_valid_count, "
+            f"sum(c.duration_min) FILTER (WHERE {valid_duration}) AS duration_min, "
+            f"{cost_fields} FROM public.charging_processes AS c "
+            "WHERE c.car_id=%s AND c.start_date >= %s AND c.start_date < %s",
+            (vehicle_id, start, end),
+        ).fetchone()
+    assert row is not None
+    total_count = int(row["total_count"])
+    ended_count = int(row["ended_count"])
+    energy_coverage = metric_coverage(
+        total_count=total_count,
+        ended_count=ended_count,
+        valid_count=int(row["energy_valid_count"]),
+    )
+    duration_coverage = metric_coverage(
+        total_count=total_count,
+        ended_count=ended_count,
+        valid_count=int(row["duration_valid_count"]),
+    )
+    cost_coverage = metric_coverage(
+        total_count=total_count,
+        ended_count=ended_count,
+        valid_count=int(row["cost_valid_count"]),
+        unavailable=not cost_available,
+    )
+    return ChargePeriodSummary(
+        vehicle_id=vehicle_id,
+        start=start,
+        end=end,
+        total_count=total_count,
+        ended_count=ended_count,
+        not_ended_count=int(row["not_ended_count"]),
+        energy_added_kwh=aggregate_value(row["energy_added_kwh"], energy_coverage, total_count),
+        duration_min=aggregate_value(row["duration_min"], duration_coverage, total_count),
+        # A configured currency is the owner's confirmation that the stored
+        # costs share that currency. MateScope never guesses or converts it.
+        cost=(
+            aggregate_value(row["cost"], cost_coverage, total_count)
+            if currency is not None
+            else None
+        ),
+        currency=currency,
+        energy_added_coverage=energy_coverage,
+        duration_coverage=duration_coverage,
+        cost_coverage=cost_coverage,
+        cost_capability=Capability(
+            available=cost_available, reason=capabilities["charge_summary"]
         ),
     )
 

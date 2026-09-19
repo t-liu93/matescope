@@ -489,6 +489,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/vehicles/{vehicle_id}/charge-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Charge Summary
+         * @description Aggregate one vehicle's complete UTC interval without loading charge rows.
+         */
+        get: operations["charge_summary_api_v1_vehicles__vehicle_id__charge_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/trips": {
         parameters: {
             query?: never;
@@ -709,6 +729,39 @@ export interface components {
              * Format: date-time
              */
             end: string;
+        };
+        /** ChargePeriodSummary */
+        ChargePeriodSummary: {
+            /** Vehicle Id */
+            vehicle_id: number;
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+            /** Total Count */
+            total_count: number;
+            /** Ended Count */
+            ended_count: number;
+            /** Not Ended Count */
+            not_ended_count: number;
+            /** Energy Added Kwh */
+            energy_added_kwh: number | null;
+            /** Duration Min */
+            duration_min: number | null;
+            /** Cost */
+            cost: number | null;
+            /** Currency */
+            currency: ("AUD" | "CAD" | "CHF" | "CNY" | "DKK" | "EUR" | "GBP" | "JPY" | "NOK" | "NZD" | "PLN" | "SEK" | "USD") | null;
+            energy_added_coverage: components["schemas"]["MetricCoverage"];
+            duration_coverage: components["schemas"]["MetricCoverage"];
+            cost_coverage: components["schemas"]["MetricCoverage"];
+            cost_capability: components["schemas"]["Capability"];
         };
         /** ConfirmInput */
         ConfirmInput: {
@@ -2292,6 +2345,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TripPeriodSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    charge_summary_api_v1_vehicles__vehicle_id__charge_summary_get: {
+        parameters: {
+            query: {
+                start: string;
+                end: string;
+            };
+            header?: never;
+            path: {
+                vehicle_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChargePeriodSummary"];
                 };
             };
             /** @description Validation Error */
