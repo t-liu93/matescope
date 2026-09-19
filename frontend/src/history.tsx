@@ -36,6 +36,7 @@ type ChargePeriodSummary = components["schemas"]["ChargePeriodSummary"];
 type TripSeries = components["schemas"]["TripSeries"];
 type ChargeSeries = components["schemas"]["ChargeSeries"];
 type TimeSeries = components["schemas"]["TimeSeries"];
+type VehicleSnapshot = components["schemas"]["VehicleSnapshot"];
 
 const TrajectoryMap = lazy(() => import("./trajectory-map"));
 
@@ -75,6 +76,10 @@ function value(value: number | null | undefined, unit: string) {
       <span className="metric-unit">{unit}</span>
     </span>
   );
+}
+
+function valueLabel(value: number | null | undefined, unit: string) {
+  return value == null ? "—" : `${value.toLocaleString(undefined, { maximumFractionDigits: 1 })} ${unit}`;
 }
 
 function whole(value: number | null | undefined) {
@@ -134,18 +139,27 @@ export function MetricCoverage({ coverage, t }: { coverage: components["schemas"
   </Stack>;
 }
 
+const sourceMessages: Record<string, string> = {
+  unconfigured: "testCodeUnconfigured", disabled: "testCodeDisabled", skipped: "testCodeSkipped",
+  invalid_credentials: "testCodeInvalidCredentials", unavailable: "testCodeUnavailable", timeout: "testCodeTimeout",
+  incompatible_schema: "testCodeIncompatibleSchema", unsafe_permissions: "testCodeUnsafePermissions",
+  insufficient_permissions: "testCodeInsufficientPermissions",
+};
+
+function sourceMessageKey(sourceCode: unknown) {
+  return typeof sourceCode === "string" ? sourceMessages[sourceCode] : undefined;
+}
+
+function capabilityMessage(t: (key: string) => string, capability?: components["schemas"]["Capability"]) {
+  return t(sourceMessageKey(capability?.reason) ?? "metricUnavailable");
+}
+
 function HistoryFailure({ retry, error }: { retry: () => void; error?: unknown }) {
   const { t } = useTranslation();
-  const sourceMessages: Record<string, string> = {
-    unconfigured: "testCodeUnconfigured", disabled: "testCodeDisabled", skipped: "testCodeSkipped",
-    invalid_credentials: "testCodeInvalidCredentials", unavailable: "testCodeUnavailable", timeout: "testCodeTimeout",
-    incompatible_schema: "testCodeIncompatibleSchema", unsafe_permissions: "testCodeUnsafePermissions",
-    insufficient_permissions: "testCodeInsufficientPermissions",
-  };
   const sourceCode = error instanceof ApiError
     ? error.sourceCode
     : (typeof error === "object" && error !== null && "sourceCode" in error && typeof error.sourceCode === "string" ? error.sourceCode : undefined);
-  const sourceMessage = sourceCode ? sourceMessages[sourceCode] : undefined;
+  const sourceMessage = sourceMessageKey(sourceCode);
   return (
     <Alert color="red">
       <Stack gap="xs">
@@ -277,6 +291,116 @@ function HistoryFilters({
       </Stack>
     </Card>
   );
+}
+
+function OverviewLatest({ snapshot, pending, error, retry, timezone, rangeBasis }: {
+  snapshot?: VehicleSnapshot;
+  pending: boolean;
+  error: unknown;
+  retry: () => void;
+  timezone: string;
+  rangeBasis: "rated" | "ideal";
+}) {
+  const { t } = useTranslation();
+  if (pending) return <Card withBorder radius="md"><Text>{t("loading")}</Text></Card>;
+  if (error || !snapshot) {
+    return <Card withBorder radius="md"><Stack gap="sm"><Title order={2}>{t("latestRecordedValues")}</Title><HistoryFailure retry={retry} error={error} /></Stack></Card>;
+  }
+  if (!snapshot.capability.available) {
+    return <Card withBorder radius="md"><Stack gap="sm"><Title order={2}>{t("latestRecordedValues")}</Title><Alert color="yellow"><Stack gap="xs"><Text>{t("latestValuesUnavailable")}</Text><Text size="sm">{capabilityMessage(t, snapshot.capability)}</Text></Stack></Alert><Button variant="light" onClick={retry}>{t("retry")}</Button></Stack></Card>;
+  }
+  const source = (at: string | null) => at ? t("sourceRecordedAt", { time: formatDate(at, timezone) }) : t("notAvailable");
+  return <Card withBorder radius="md" aria-label={t("latestRecordedValues")}>
+    <Stack gap="sm">
+      <Group justify="space-between" align="start">
+        <div><Title order={2}>{t("latestRecordedValues")}</Title><Text size="sm" c="dimmed">{t("latestRecordedValuesHelp")}</Text></div>
+        <Button size="compact-sm" variant="light" onClick={retry}>{t("refresh")}</Button>
+      </Group>
+      <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="sm">
+        <div><Text size="sm" c="dimmed">{t("batteryLevel")}</Text><Text>{whole(snapshot.battery_level)}{snapshot.battery_level != null && "%"}</Text><Text size="xs" c="dimmed">{source(snapshot.battery_level_at)}</Text></div>
+        <div><Text size="sm" c="dimmed">{t("range")} · {t(`rangeBasis_${rangeBasis}`)}</Text><Text>{value(snapshot.range_km, "km")}</Text><Text size="xs" c="dimmed">{source(snapshot.range_at)}</Text></div>
+        <div><Text size="sm" c="dimmed">{t("odometer")}</Text><Text>{value(snapshot.odometer_km, "km")}</Text><Text size="xs" c="dimmed">{source(snapshot.odometer_at)}</Text></div>
+      </SimpleGrid>
+    </Stack>
+  </Card>;
+}
+
+function OverviewSummary({ trip, charge, tripPending, chargePending, tripError, chargeError, retryTrip, retryCharge, historyPath }: {
+  trip?: TripPeriodSummary;
+  charge?: ChargePeriodSummary;
+  tripPending: boolean;
+  chargePending: boolean;
+  tripError: unknown;
+  chargeError: unknown;
+  retryTrip: () => void;
+  retryCharge: () => void;
+  historyPath: (pathname: string) => string;
+}) {
+  const { t } = useTranslation();
+  const costConfigured = charge?.currency != null;
+  const metric = (content: React.ReactNode, coverage?: components["schemas"]["MetricCoverage"], capability?: components["schemas"]["Capability"]) => <Stack gap={0}>{content}{coverage && <MetricCoverage coverage={coverage} t={t} />}{capability && !capability.available && <Text size="xs" c="dimmed">{capabilityMessage(t, capability)}</Text>}</Stack>;
+  const slot = (label: string, content: React.ReactNode, to: string, error: unknown, retry: () => void, pending: boolean, linkLabel = label) =>
+    <div><Text size="sm" c="dimmed">{label}</Text>{pending ? <Text>{t("loading")}</Text> : error ? <HistoryFailure retry={retry} error={error} /> : <Link to={historyPath(to)} aria-label={linkLabel}>{content}</Link>}</div>;
+  return <Card withBorder radius="md" aria-label={t("selectedPeriodOverview")}>
+    <Stack gap="sm"><Title order={2}>{t("selectedPeriodOverview")}</Title>
+      <SimpleGrid cols={{ base: 2, md: 4 }} spacing="sm">
+        {slot(t("distance"), metric(value(trip?.distance_km, "km"), trip?.distance_coverage), "/trips", tripError, retryTrip, tripPending, valueLabel(trip?.distance_km, "km"))}
+        {slot(t("estimatedEnergy"), metric(value(trip?.estimated_energy_kwh, "kWh"), trip?.estimated_energy_coverage, trip?.estimate_capability), "/trips", tripError, retryTrip, tripPending, valueLabel(trip?.estimated_energy_kwh, "kWh"))}
+        {slot(t("energyAdded"), metric(value(charge?.energy_added_kwh, "kWh"), charge?.energy_added_coverage), "/charges", chargeError, retryCharge, chargePending, valueLabel(charge?.energy_added_kwh, "kWh"))}
+        {slot(t("recordedCost"), metric(costConfigured ? cost(charge?.cost, charge?.currency, t) : <Text size="sm" c="dimmed">{t("currencyNotConfigured")}</Text>, charge?.cost_coverage, charge?.cost_capability), "/charges", chargeError, retryCharge, chargePending)}
+      </SimpleGrid>
+    </Stack>
+  </Card>;
+}
+
+function OverviewRecent({ trips, charges, tripsPending, chargesPending, tripsError, chargesError, retryTrips, retryCharges, timezone, historyPath, listPath }: {
+  trips?: components["schemas"]["TripPage"];
+  charges?: components["schemas"]["ChargePage"];
+  tripsPending: boolean;
+  chargesPending: boolean;
+  tripsError: unknown;
+  chargesError: unknown;
+  retryTrips: () => void;
+  retryCharges: () => void;
+  timezone: string;
+  historyPath: (pathname: string) => string;
+  listPath: string;
+}) {
+  const { t } = useTranslation();
+  const records = <T extends Trip | Charge>(items: T[] | undefined, pending: boolean, error: unknown, retry: () => void, kind: "trips" | "charges") => {
+    if (pending) return <Text>{t("loading")}</Text>;
+    if (error) return <HistoryFailure retry={retry} error={error} />;
+    if (!items?.length) return <Alert>{kind === "trips" ? t("noRecentTrips") : t("noRecentCharges")}</Alert>;
+    return <Stack gap="xs">{items.slice(0, 3).map((item) => <Card key={item.id} withBorder radius="sm"><Group justify="space-between" wrap="nowrap"><div><Text fw={600}>{formatDate(item.start, timezone)}</Text><Text size="sm" c="dimmed">{kind === "trips" ? `${(item as Trip).start_place ?? t("unknownLocation")} → ${(item as Trip).end_place ?? t("unknownLocation")}` : (item as Charge).place ?? t("unknownLocation")}</Text></div><RecordDetailLink to={historyPath(`/${kind}/${item.id}`)} listPath={listPath} recordId={item.id} /></Group></Card>)}</Stack>;
+  };
+  return <Card withBorder radius="md" aria-label={t("recentRecords")}><Stack gap="md"><Title order={2}>{t("recentRecords")}</Title><SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
+    <Stack gap="sm"><Group justify="space-between"><Title order={3}>{t("recentTrips")}</Title><Button component={Link} variant="subtle" size="compact-sm" to={historyPath("/trips")}>{t("viewAllTrips")}</Button></Group>{records(trips?.items, tripsPending, tripsError, retryTrips, "trips")}</Stack>
+    <Stack gap="sm"><Group justify="space-between"><Title order={3}>{t("recentCharges")}</Title><Button component={Link} variant="subtle" size="compact-sm" to={historyPath("/charges")}>{t("viewAllCharges")}</Button></Group>{records(charges?.items, chargesPending, chargesError, retryCharges, "charges")}</Stack>
+  </SimpleGrid></Stack></Card>;
+}
+
+function Overview() {
+  const { t } = useTranslation();
+  const { vehicle, window: scopedWindow, emptyWindow, historyPath } = useHistoryContext();
+  const location = useLocation();
+  const preferences = useHistorySettings();
+  const online = useOnlineStatus();
+  const enabled = online && Boolean(preferences.data?.preferences?.saved) && Boolean(vehicle);
+  const snapshot = useQuery<VehicleSnapshot>({ queryKey: ["latest-values", vehicle?.id, preferences.data?.preferences?.range_basis], queryFn: ({ signal }) => historyApi.snapshot(vehicle!.id, { signal }), enabled });
+  const tripSummary = useQuery<TripPeriodSummary>({ queryKey: ["trip-summary", vehicle?.id, scopedWindow?.start, scopedWindow?.end, preferences.data?.preferences?.range_basis], queryFn: ({ signal }) => historyApi.tripSummary({ ...scopedWindow!, vehicleId: vehicle!.id }, { signal }), enabled: enabled && !emptyWindow && Boolean(scopedWindow) });
+  const chargeSummary = useQuery<ChargePeriodSummary>({ queryKey: ["charge-summary", vehicle?.id, scopedWindow?.start, scopedWindow?.end, preferences.data?.preferences?.display_currency], queryFn: ({ signal }) => historyApi.chargeSummary({ ...scopedWindow!, vehicleId: vehicle!.id }, { signal }), enabled: enabled && !emptyWindow && Boolean(scopedWindow) });
+  const trips = useQuery<components["schemas"]["TripPage"]>({ queryKey: ["trips", vehicle?.id, scopedWindow?.start, scopedWindow?.end, "overview"], queryFn: ({ signal }) => historyApi.trips({ ...scopedWindow!, vehicleId: vehicle!.id }, { signal }), enabled: enabled && !emptyWindow && Boolean(scopedWindow) });
+  const charges = useQuery<components["schemas"]["ChargePage"]>({ queryKey: ["charges", vehicle?.id, scopedWindow?.start, scopedWindow?.end, "overview"], queryFn: ({ signal }) => historyApi.charges({ ...scopedWindow!, vehicleId: vehicle!.id }, { signal }), enabled: enabled && !emptyWindow && Boolean(scopedWindow) });
+  if (!online) return <OfflineVehicleData />;
+  if (preferences.isPending) return <Container py="xl"><Text>{t("loading")}</Text></Container>;
+  if (preferences.error || !preferences.data?.preferences?.saved) return <Container py="xl"><HistoryFailure retry={() => void preferences.refetch()} /></Container>;
+  const timezone = preferences.data.preferences.timezone;
+  const listPath = `${location.pathname}${location.search}`;
+  return <Container size="xl" py="xl"><Stack gap="lg">
+    <OverviewLatest snapshot={snapshot.data} pending={snapshot.isPending} error={snapshot.error} retry={() => void snapshot.refetch()} timezone={timezone} rangeBasis={preferences.data.preferences.range_basis ?? "rated"} />
+    {emptyWindow ? <Card withBorder radius="md" aria-label={t("selectedPeriodOverview")}><Stack><Title order={2}>{t("selectedPeriodOverview")}</Title><Alert>{t("noHistory")}</Alert></Stack></Card> : <OverviewSummary trip={tripSummary.data} charge={chargeSummary.data} tripPending={tripSummary.isPending} chargePending={chargeSummary.isPending} tripError={tripSummary.error} chargeError={chargeSummary.error} retryTrip={() => void tripSummary.refetch()} retryCharge={() => void chargeSummary.refetch()} historyPath={historyPath} />}
+    {emptyWindow ? <Card withBorder radius="md" aria-label={t("recentRecords")}><Stack><Title order={2}>{t("recentRecords")}</Title><Alert>{t("noHistory")}</Alert></Stack></Card> : <OverviewRecent trips={trips.data} charges={charges.data} tripsPending={trips.isPending} chargesPending={charges.isPending} tripsError={trips.error} chargesError={charges.error} retryTrips={() => void trips.refetch()} retryCharges={() => void charges.refetch()} timezone={timezone} historyPath={historyPath} listPath={listPath} />}
+  </Stack></Container>;
 }
 
 function HistoryList({ kind }: { kind: "trips" | "charges" }) {
@@ -638,6 +762,7 @@ export function VehiclesPage() {
 
 export const TripsPage = () => <HistorySelectionGuard><HistoryList kind="trips" /></HistorySelectionGuard>;
 export const ChargesPage = () => <HistorySelectionGuard><HistoryList kind="charges" /></HistorySelectionGuard>;
+export const OverviewPage = () => <HistorySelectionGuard><Overview /></HistorySelectionGuard>;
 export const TripDetailPage = () => {
   const { id } = useParams();
   return <HistoryDetail key={id} kind="trips" />;

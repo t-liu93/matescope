@@ -133,6 +133,10 @@ type MockOptions = {
   displayCurrency?: "EUR";
   chargeItems?: Record<string, unknown>[];
   chargeDetails?: Record<string, Record<string, unknown>>;
+  snapshotFailure?: boolean;
+  snapshotPermissionFailure?: boolean;
+  snapshotResponse?: Record<string, unknown>;
+  snapshotRequests?: { count: number };
 };
 async function mockHistoryApi(page: Page, options: MockOptions = {}) {
   const lists: URL[] = [];
@@ -176,6 +180,17 @@ async function mockHistoryApi(page: Page, options: MockOptions = {}) {
       }
       const custom = preset === "custom";
       return route.fulfill({ json: { preset, timezone: "Europe/Amsterdam", start: custom ? "2026-01-01T00:00:00Z" : preset === "all_history" ? null : "2026-08-14T00:00:00Z", end: "2026-09-13T00:00:00Z", is_empty: options.empty ?? false } });
+    }
+    if (/\/vehicles\/\d+\/snapshot$/.test(path)) {
+      if (options.snapshotRequests) options.snapshotRequests.count += 1;
+      if (options.snapshotPermissionFailure) return route.fulfill({ status: 503, json: { detail: { code: "insufficient_permissions" } } });
+      if (options.snapshotFailure) return route.fulfill({ status: 503, json: { detail: "unavailable" } });
+      return route.fulfill({ json: {
+        vehicle_id: Number(path.split("/").at(-2)), battery_level: 72, battery_level_at: "2026-09-14T09:00:00Z",
+        range_km: 310.5, range_at: "2026-09-14T08:00:00Z", odometer_km: 12345.6, odometer_at: "2026-09-13T20:00:00Z",
+        capability: { available: true, reason: null },
+        ...options.snapshotResponse,
+      } });
     }
     if (/\/vehicles\/\d+\/trip-summary$/.test(path)) {
       options.tripSummaryRequests?.requests.push(request);
@@ -487,9 +502,10 @@ test.describe("T09 calendar history filters", () => {
     await localTiles(page);
     await page.goto("/trips");
     const navigation = page.getByRole("navigation", { name: "Primary navigation", exact: true });
+    await expect(navigation.getByRole("link", { name: "Overview", exact: true })).toBeVisible();
     await expect(navigation.getByRole("link", { name: "Trips", exact: true })).toBeVisible();
     await expect(navigation.getByRole("link", { name: "Charges", exact: true })).toBeVisible();
-    await expect(navigation.getByRole("link")).toHaveCount(2);
+    await expect(navigation.getByRole("link")).toHaveCount(3);
   });
 
   test("uses the phone header and safe-area bottom bar for shared selection", async ({ page }, testInfo) => {
@@ -514,7 +530,7 @@ test.describe("T09 calendar history filters", () => {
     await page.goto("/trips");
     const navigation = page.getByRole("navigation", { name: "Primary navigation", exact: true });
     await expect(navigation).toBeVisible();
-    await expect(navigation.getByRole("link")).toHaveCount(2);
+    await expect(navigation.getByRole("link")).toHaveCount(3);
     await expect(page.getByRole("textbox", { name: "Select vehicle", exact: true })).toBeVisible();
     await page.setViewportSize({ width: 1280, height: 900 });
     await expect(navigation).toBeVisible();
@@ -908,6 +924,64 @@ test.describe("T30 charge temperature More data", () => {
   });
 });
 
+test.describe("T32 concise overview", () => {
+  test("keeps the three overview areas scoped, retains the latest source times, and links into history", async ({ page }) => {
+    const snapshotRequests = { count: 0 };
+    await mockHistoryApi(page, { snapshotRequests });
+    await page.goto("/overview?vehicle=1&start=2026-09-01T00%3A00%3A00Z&end=2026-10-01T00%3A00%3A00Z");
+    await expect(page.getByRole("navigation", { name: "Primary navigation", exact: true }).getByRole("link")).toHaveCount(3);
+    await expect(page.getByRole("heading", { name: "Latest recorded values", exact: true })).toBeVisible();
+    await expect(page.getByText("Recorded Sep 14, 2026, 11:00 AM", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Selected-period summary", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Recent records in the selected period", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "456.7 km", exact: true })).toHaveAttribute("href", /\/trips\?vehicle=1&start=2026-09-01T00%3A00%3A00Z&end=2026-10-01T00%3A00%3A00Z/);
+    await page.getByRole("link", { name: "View all charges", exact: true }).click();
+    await expect(page).toHaveURL(/\/charges\?vehicle=1&start=2026-09-01T00%3A00%3A00Z&end=2026-10-01T00%3A00%3A00Z/);
+    await page.goto("/overview?vehicle=1&start=2026-08-01T00%3A00%3A00Z&end=2026-09-01T00%3A00%3A00Z");
+    await expect(page.getByRole("heading", { name: "Latest recorded values", exact: true })).toBeVisible();
+    // A full page entry intentionally refetches; the snapshot query itself has
+    // no date bounds, so changing the selected range never changes its source.
+    expect(snapshotRequests.count).toBe(2);
+  });
+
+  test("keeps period areas visible when the latest-values request fails", async ({ page }) => {
+    await mockHistoryApi(page, { snapshotFailure: true });
+    await page.goto("/overview?vehicle=1&start=2026-09-01T00%3A00%3A00Z&end=2026-10-01T00%3A00%3A00Z");
+    await expect(page.getByText("We could not load history. Please try again.", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Selected-period summary", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Recent records in the selected period", exact: true })).toBeVisible();
+  });
+
+  test("distinguishes latest-values permission failures from request failures", async ({ page }) => {
+    await mockHistoryApi(page, { snapshotPermissionFailure: true });
+    await page.goto("/overview?vehicle=1&start=2026-09-01T00%3A00%3A00Z&end=2026-10-01T00%3A00%3A00Z");
+    await expect(page.getByText("The PostgreSQL account lacks required permissions.", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Selected-period summary", exact: true })).toBeVisible();
+  });
+
+  test("shows successful summary coverage and capability unavailability in their own slots", async ({ page }) => {
+    await mockHistoryApi(page, {
+      tripSummaryResponse: {
+        estimated_energy_kwh: null,
+        estimated_energy_coverage: { applicable_count: 3, valid_count: 0, reason: "unavailable" },
+        estimate_capability: { available: false, reason: "insufficient_permissions" },
+      },
+      chargeSummaryResponse: {
+        cost: null,
+        currency: "EUR",
+        cost_coverage: { applicable_count: 3, valid_count: 0, reason: "unavailable" },
+        cost_capability: { available: false, reason: "incompatible_schema" },
+      },
+    });
+    await page.goto("/overview?vehicle=1&start=2026-09-01T00%3A00%3A00Z&end=2026-10-01T00%3A00%3A00Z");
+    const summary = page.locator('[aria-label="Selected-period summary"]');
+    await expect(summary.getByText("This metric is unavailable.", { exact: true })).toHaveCount(2);
+    await expect(summary.getByText("The PostgreSQL account lacks required permissions.", { exact: true })).toBeVisible();
+    await expect(summary.getByText("The PostgreSQL schema is incompatible.", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Recent records in the selected period", exact: true })).toBeVisible();
+  });
+});
+
 test.describe("T10 visual foundations", () => {
   test("follows explicit light and dark themes with readable metric states", async ({ page }) => {
     await mockHistoryApi(page);
@@ -949,7 +1023,7 @@ test.describe("T10 visual foundations", () => {
     await localTiles(page);
     await page.goto("/trips");
     const items = page.getByRole("navigation", { name: "Primary navigation", exact: true }).getByRole("link");
-    await expect(items).toHaveCount(2);
+    await expect(items).toHaveCount(3);
     for (let index = 0; index < await items.count(); index += 1) {
       const box = await items.nth(index).boundingBox();
       expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);

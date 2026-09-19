@@ -230,6 +230,11 @@ export const historyApi = {
       signal: options?.signal,
       params: { path: { vehicle_id: vehicleId }, query: { preset, start_date: options?.startDate, end_date: options?.endDate } },
     })),
+  snapshot: (vehicleId: number, options?: HistoryRequestOptions) =>
+    unwrap(api.GET("/api/v1/vehicles/{vehicle_id}/snapshot", {
+      signal: options?.signal,
+      params: { path: { vehicle_id: vehicleId } },
+    })),
   capabilities: (options?: HistoryRequestOptions) =>
     unwrap(api.GET("/api/v1/history/capabilities", { signal: options?.signal })),
   trips: (window: HistoryWindow, options?: HistoryRequestOptions) =>

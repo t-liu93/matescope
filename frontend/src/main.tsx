@@ -49,6 +49,7 @@ import { ApiError, authApi, setCsrf, settingsApi } from "./api/client";
 import {
   ChargeDetailPage,
   ChargesPage,
+  OverviewPage,
   TripDetailPage,
   TripsPage,
   VehiclesPage,
@@ -1541,6 +1542,7 @@ function ShellNavigation({ variant }: { variant: "sidebar" | "bottom" }) {
   const location = useLocation();
   const { historyPath } = useHistoryContext();
   const items = [
+    { key: "overview", to: "/overview" },
     { key: "trips", to: "/trips" },
     { key: "charges", to: "/charges" },
   ] as const;
@@ -1578,7 +1580,7 @@ function Shell() {
   const location = useLocation();
   const showHeader = !location.pathname.startsWith("/login");
   const { t } = useTranslation();
-  const showHistoryContext = /^\/(vehicles|trips|charges)(?:\/|$)/.test(location.pathname);
+  const showHistoryContext = /^\/(overview|vehicles|trips|charges)(?:\/|$)/.test(location.pathname);
   return (
     <AppShell
       header={showHeader ? { height: 64 } : undefined}
@@ -1647,6 +1649,7 @@ function Shell() {
             }
           />
           <Route path="/vehicles" element={<Protected><VehiclesPage /></Protected>} />
+          <Route path="/overview" element={<Protected><OverviewPage /></Protected>} />
           <Route path="/trips" element={<Protected><TripsPage /></Protected>} />
           <Route path="/trips/:id" element={<Protected><TripDetailPage /></Protected>} />
           <Route path="/charges" element={<Protected><ChargesPage /></Protected>} />

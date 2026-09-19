@@ -51,7 +51,7 @@ export function HistoryContextProvider({ children }: { children: ReactNode }) {
   const [rememberedVehicleId, setRememberedVehicleId] = useState<number | null>(null);
   const search = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const rawUrlVehicle = search.get("vehicle");
-  const historyRoute = /^\/(vehicles|trips|charges)(?:\/|$)/.test(location.pathname);
+  const historyRoute = /^\/(overview|vehicles|trips|charges)(?:\/|$)/.test(location.pathname);
   const settings = useQuery({ queryKey: ["settings"], queryFn: settingsApi.get, enabled: historyRoute, staleTime: Infinity });
   const explicitVehicleId = rawUrlVehicle && /^\d+$/.test(rawUrlVehicle) ? Number(rawUrlVehicle) : null;
   const hasExplicitVehicle = rawUrlVehicle !== null;
