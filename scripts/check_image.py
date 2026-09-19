@@ -111,6 +111,34 @@ def main() -> None:
             },
             "PUT",
         )
+        # Simulate an existing pre-M1 JSON record.  The current image must start it
+        # without a SQLite migration and resolve the added display defaults.
+        command(
+            "docker",
+            "exec",
+            app,
+            "/app/.venv/bin/python",
+            "-c",
+            "import json,sqlite3; p='/app/data/matescope.sqlite3'; c=sqlite3.connect(p); "
+            "r=c.execute('SELECT configuration FROM application_settings WHERE id=1').fetchone(); "
+            "v=json.loads(r[0]); v['preferences'].pop('range_basis',None); "
+            "v['preferences'].pop('display_currency',None); "
+            "c.execute('UPDATE application_settings SET configuration=? WHERE id=1', "
+            "(json.dumps(v),)); "
+            "c.commit()",
+        )
+        command(*compose, "up", "-d", "--no-build", "--no-deps", "--force-recreate", "app")
+        app = command(*compose, "ps", "-q", "app")
+        assert json.loads(command("docker", "inspect", app))[0]["Image"] == image_id
+        wait_ready(base)
+        assert client.request("/api/v1/auth/me") == {"username": "m0-t03-admin"}
+        refreshed_csrf = client.request("/api/v1/auth/csrf")
+        assert isinstance(refreshed_csrf, dict)
+        client.csrf = refreshed_csrf["csrf_token"]
+        legacy_preferences = client.request("/api/v1/settings")
+        assert isinstance(legacy_preferences, dict)
+        assert legacy_preferences["preferences"].get("range_basis") == "rated"
+        assert legacy_preferences["preferences"].get("display_currency") is None
         tested = client.request("/api/v1/settings/postgresql/test", method="POST")
         assert isinstance(tested, dict) and tested["status"] == "success"
         vehicles = client.request("/api/v1/vehicles")
@@ -121,8 +149,66 @@ def main() -> None:
         assert isinstance(trajectory, dict) and 0 < len(trajectory["points"]) <= 2000
         charge = client.request("/api/v1/charges/1")
         assert isinstance(charge, dict) and charge["energy_added_kwh"] == 22.5
+        before_upgrade = client.request("/api/v1/history/capabilities")
+        assert isinstance(before_upgrade, dict)
+        before_capabilities = before_upgrade["capabilities"]
+        assert all(
+            before_capabilities[name] == {
+                "available": False,
+                "reason": "insufficient_permissions",
+            }
+            for name in (
+                "trip_details", "charge_details", "latest_values", "trip_series", "charge_series"
+            )
+        )
+        postgres = command(*compose, "ps", "-q", "postgres")
+        guard = command(
+            "docker",
+            "exec",
+            postgres,
+            "psql",
+            "-U",
+            "teslamate_admin",
+            "-d",
+            "teslamate_synthetic",
+            "-Atc",
+            "SELECT identity FROM public.matescope_synthetic_guard",
+        )
+        assert guard == "matescope-synthetic-m0-t04", "Refusing a non-synthetic database"
+        upgrade = Path(__file__).with_name("postgresql") / "upgrade-readonly.sql"
+        command("docker", "cp", str(upgrade), f"{postgres}:/tmp/upgrade-readonly.sql")
+        command(
+            "docker",
+            "exec",
+            postgres,
+            "psql",
+            "-X",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-U",
+            "teslamate_admin",
+            "-d",
+            "teslamate_synthetic",
+            "-v",
+            "matescope_role=matescope_readonly",
+            "-f",
+            "/tmp/upgrade-readonly.sql",
+        )
+        after_upgrade = client.request("/api/v1/history/capabilities")
+        assert isinstance(after_upgrade, dict)
+        after_capabilities = after_upgrade["capabilities"]
+        assert all(
+            status == {"available": True, "reason": None}
+            for status in after_capabilities.values()
+        )
+        trip_series = client.request("/api/v1/trips/1/series")
+        charge_series = client.request("/api/v1/charges/1/series")
+        assert isinstance(trip_series, dict) and trip_series["capability"]["available"] is True
+        assert isinstance(charge_series, dict) and charge_series["capability"]["available"] is True
+        assert client.request("/api/v1/auth/me") == {"username": "m0-t03-admin"}
+        assert client.request("/api/v1/vehicles") == vehicles
         print(
-            f"{args.platform}: non-root startup, authentication, settings and read-only SQL passed",
+            f"{args.platform}: legacy config/reader startup and explicit upgrade grants passed",
             flush=True,
         )
         subprocess.run(
