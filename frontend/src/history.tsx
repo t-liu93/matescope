@@ -29,6 +29,7 @@ type Trip = components["schemas"]["Trip"];
 type Charge = components["schemas"]["Charge"];
 type HistoryPage = components["schemas"]["TripPage"] | components["schemas"]["ChargePage"];
 type TripPeriodSummary = components["schemas"]["TripPeriodSummary"];
+type ChargePeriodSummary = components["schemas"]["ChargePeriodSummary"];
 
 const TrajectoryMap = lazy(() => import("./trajectory-map"));
 
@@ -80,6 +81,14 @@ function duration(value: number | null | undefined) {
   const minutes = Math.round(value);
   const hours = Math.floor(minutes / 60);
   return <span className="metric-value">{hours ? `${hours}h ${minutes % 60}m` : `${minutes}m`}</span>;
+}
+
+function cost(value: number | null | undefined, currency: string | null | undefined, t: (key: string) => string) {
+  if (value == null) return <span className="metric-value metric-value-empty">{t("costUnknown")}</span>;
+  const formatted = currency
+    ? new Intl.NumberFormat(undefined, { style: "currency", currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)
+    : value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return <span className="metric-value">{formatted}</span>;
 }
 
 function localDay(value: string, timezone: string) {
@@ -139,6 +148,25 @@ function TripSummary({ summary, pending, error, retry }: { summary?: TripPeriodS
         <div><Text size="sm" c="dimmed">{t("distance")}</Text><Text>{value(summary.distance_km, "km")}</Text><MetricCoverage coverage={summary.distance_coverage} t={t} /></div>
         <div><Text size="sm" c="dimmed">{t("duration")}</Text><Text>{duration(summary.duration_min)}</Text><MetricCoverage coverage={summary.duration_coverage} t={t} /></div>
         <div><Text size="sm" c="dimmed">{t("estimatedEnergy")}</Text><Text>{value(summary.estimated_energy_kwh, "kWh")}</Text><MetricCoverage coverage={summary.estimated_energy_coverage} t={t} /></div>
+      </SimpleGrid>
+      {summary.not_ended_count > 0 && <Text size="sm" c="dimmed">{t("notEndedExcluded", { count: summary.not_ended_count })}</Text>}
+    </Stack>
+  </Card>;
+}
+
+function ChargeSummary({ summary, pending, error, retry }: { summary?: ChargePeriodSummary; pending: boolean; error: unknown; retry: () => void }) {
+  const { t } = useTranslation();
+  if (pending) return <Card withBorder radius="md"><Text>{t("loading")}</Text></Card>;
+  if (error || !summary) return <HistoryFailure retry={retry} error={error} />;
+  const currencyConfigured = summary.currency !== null;
+  return <Card withBorder radius="md" aria-label={t("chargePeriodSummary")}>
+    <Stack gap="sm">
+      <Title order={2}>{t("chargePeriodSummary")}</Title>
+      <SimpleGrid cols={{ base: 2, md: 4 }} spacing="sm">
+        <div><Text size="sm" c="dimmed">{t("records")}</Text><Text>{summary.total_count.toLocaleString()}</Text></div>
+        <div><Text size="sm" c="dimmed">{t("energyAdded")}</Text><Text>{value(summary.energy_added_kwh, "kWh")}</Text><MetricCoverage coverage={summary.energy_added_coverage} t={t} /></div>
+        <div><Text size="sm" c="dimmed">{t("duration")}</Text><Text>{duration(summary.duration_min)}</Text><MetricCoverage coverage={summary.duration_coverage} t={t} /></div>
+        <div><Text size="sm" c="dimmed">{t("recordedCost")}</Text><Text>{currencyConfigured ? cost(summary.cost, summary.currency, t) : t("currencyNotConfigured")}</Text><MetricCoverage coverage={summary.cost_coverage} t={t} /></div>
       </SimpleGrid>
       {summary.not_ended_count > 0 && <Text size="sm" c="dimmed">{t("notEndedExcluded", { count: summary.not_ended_count })}</Text>}
     </Stack>
@@ -250,6 +278,11 @@ function HistoryList({ kind }: { kind: "trips" | "charges" }) {
     queryFn: ({ signal }) => historyApi.tripSummary({ ...scopedWindow!, vehicleId: vehicle!.id }, { signal }),
     enabled: kind === "trips" && online && !emptyWindow && Boolean(preferences.data?.preferences?.saved) && Boolean(vehicle && scopedWindow),
   });
+  const chargeSummary = useQuery<ChargePeriodSummary>({
+    queryKey: ["charge-summary", vehicle?.id, scopedWindow?.start, scopedWindow?.end, preferences.data?.preferences?.display_currency],
+    queryFn: ({ signal }) => historyApi.chargeSummary({ ...scopedWindow!, vehicleId: vehicle!.id }, { signal }),
+    enabled: kind === "charges" && online && !emptyWindow && Boolean(preferences.data?.preferences?.saved) && Boolean(vehicle && scopedWindow),
+  });
   const clear = () => {
     if (scopedWindow) setDraft(scopedWindow);
   };
@@ -266,12 +299,11 @@ function HistoryList({ kind }: { kind: "trips" | "charges" }) {
         <Text size="sm" c="dimmed">{t("timesShownIn", { timezone })}</Text>
         <HistoryFilters window={draft} clear={clear} timezone={timezone} />
         {kind === "trips" && !emptyWindow && <TripSummary summary={tripSummary.data} pending={tripSummary.isPending} error={tripSummary.error} retry={() => void tripSummary.refetch()} />}
+        {kind === "charges" && !emptyWindow && <ChargeSummary summary={chargeSummary.data} pending={chargeSummary.isPending} error={chargeSummary.error} retry={() => void chargeSummary.refetch()} />}
         {query.isPending && <Text>{t("loading")}</Text>}
         {query.error && <HistoryFailure retry={() => void query.refetch()} />}
         {(emptyWindow || page?.items.length === 0) && <Alert>{t("noHistory")}</Alert>}
-        {kind === "trips" ? <TripRows items={(page?.items ?? []) as Trip[]} timezone={timezone} historyPath={historyPath} /> : page?.items.map((item) => (
-          <Card key={item.id} withBorder radius="md"><Stack gap="xs"><Text fw={600}>{formatDate(item.start, timezone)}</Text><Text>{item.end ? `${formatDate(item.start, timezone)} – ${formatDate(item.end, timezone)}` : t("unfinished")}</Text><Text>{value((item as Charge).energy_added_kwh, "kWh")}</Text><Button component={Link} variant="light" to={historyPath(`/${kind}/${item.id}`)}>{t("viewDetails")}</Button></Stack></Card>
-        ))}
+        {kind === "trips" ? <TripRows items={(page?.items ?? []) as Trip[]} timezone={timezone} historyPath={historyPath} /> : <ChargeRows items={(page?.items ?? []) as Charge[]} timezone={timezone} historyPath={historyPath} currency={preferences.data.preferences.display_currency ?? null} />}
         <Group>
           {activeCursors.length > 0 && <Button variant="light" onClick={() => { setCursorScope(scope); setCursors((value) => [...value].slice(0, -1)); }}>{t("previousPage")}</Button>}
           {page?.next_cursor && <Button variant="light" onClick={() => { setCursorScope(scope); setCursors((value) => [...value, page.next_cursor!]); }}>{t("nextPage")}</Button>}
@@ -279,6 +311,35 @@ function HistoryList({ kind }: { kind: "trips" | "charges" }) {
       </Stack>
     </Container>
   );
+}
+
+function ChargeRows({ items, timezone, historyPath, currency }: { items: Charge[]; timezone: string; historyPath: (pathname: string) => string; currency: string | null }) {
+  const { t } = useTranslation();
+  const groups = useMemo(() => {
+    const ordered = [...items].sort((a, b) => b.start.localeCompare(a.start) || b.id - a.id);
+    return ordered.reduce<{ label: string; items: Charge[] }[]>((acc, item) => {
+      const label = localDay(item.start, timezone);
+      const group = acc.at(-1);
+      if (group?.label === label) group.items.push(item); else acc.push({ label, items: [item] });
+      return acc;
+    }, []);
+  }, [items, timezone]);
+  return <Stack gap="sm">{groups.map((group) => <Fragment key={group.label}>
+    <Text fw={600} size="sm" c="dimmed">{group.label}</Text>
+    {group.items.map((item) => <Card key={item.id} withBorder radius="md" className="charge-list-card">
+      <Stack gap="xs">
+        <Group justify="space-between" align="start" wrap="nowrap"><Text fw={600}>{formatDate(item.start, timezone)}</Text><Text size="sm" c="dimmed">{item.end ? duration(item.duration_min) : t("recordNotEnded")}</Text></Group>
+        <Text className="charge-place" title={item.place ?? t("unknownLocation")}>{item.place ?? t("unknownLocation")}</Text>
+        <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="xs">
+          <Text>{t("soc")}: {whole(item.start_battery_level)} → {whole(item.end_battery_level)}</Text>
+          <Text>{t("energyAdded")}: {value(item.energy_added_kwh, "kWh")}</Text>
+          <Text>{t("duration")}: {item.end ? duration(item.duration_min) : t("recordNotEnded")}</Text>
+          <Text>{t("recordedCost")}: {cost(item.cost, currency, t)} {!currency && item.cost != null && <span className="currency-unconfigured">{t("currencyNotConfigured")}</span>}</Text>
+        </SimpleGrid>
+        <Button component={Link} variant="light" to={historyPath(`/charges/${item.id}`)}>{t("viewDetails")}</Button>
+      </Stack>
+    </Card>)}
+  </Fragment>)}</Stack>;
 }
 
 function TripRows({ items, timezone, historyPath }: { items: Trip[]; timezone: string; historyPath: (pathname: string) => string }) {

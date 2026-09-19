@@ -71,6 +71,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .trajectory-map { height: min(52vh, 420px); min-height: 240px; width: 100%; }
 .trip-list-card { min-width: 0; }
 .trip-place { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.charge-list-card { min-width: 0; }
+.charge-place { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.currency-unconfigured { color: var(--mantine-color-dimmed); font-size: var(--mantine-font-size-xs); }
 .shell-header { padding-inline: 8px; }
 .shell-header-actions .mantine-Button-root { min-height: 44px; padding-inline: 8px; }
 .shell-vehicle-select { width: min(11rem, 38vw); }

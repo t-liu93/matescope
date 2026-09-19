@@ -122,11 +122,17 @@ type MockOptions = {
   tripSummaryPermissionFailure?: boolean;
   tripSummaryRequests?: { requests: URL[] };
   tripSummaryResponse?: Record<string, unknown>;
+  chargeSummaryFailure?: boolean;
+  chargeSummaryPermissionFailure?: boolean;
+  chargeSummaryRequests?: { requests: URL[] };
+  chargeSummaryResponse?: Record<string, unknown>;
+  displayCurrency?: "EUR";
+  chargeItems?: Record<string, unknown>[];
 };
 async function mockHistoryApi(page: Page, options: MockOptions = {}) {
   const lists: URL[] = [];
   const settings = {
-    preferences: { language: options.language ?? "en", timezone: "Europe/Amsterdam", tile_url: "https://tiles.example/{z}/{x}/{y}.png", range_basis: "rated", display_currency: null, saved: true },
+    preferences: { language: options.language ?? "en", timezone: "Europe/Amsterdam", tile_url: "https://tiles.example/{z}/{x}/{y}.png", range_basis: "rated", display_currency: options.displayCurrency ?? null, saved: true },
     postgresql: { password_set: false, version: 1, status: "success", test_available: true, test_result: null, host: "postgres", username: "reader", enabled: true, skipped: false, port: 5432, database: "teslamate_synthetic", sslmode: "disable" },
     mqtt: { password_set: false, version: 0, status: "disabled", test_available: false, test_result: null, host: "", username: "", enabled: false, skipped: true, port: 1883, tls: false, verify_tls: true, topic_prefix: "" },
     smtp: { password_set: false, version: 0, status: "disabled", test_available: false, test_result: null, host: "", username: "", enabled: false, skipped: true, port: 587, tls_mode: "starttls", verify_tls: true, sender: "" },
@@ -180,13 +186,25 @@ async function mockHistoryApi(page: Page, options: MockOptions = {}) {
         ...options.tripSummaryResponse,
       } });
     }
+    if (/\/vehicles\/\d+\/charge-summary$/.test(path)) {
+      options.chargeSummaryRequests?.requests.push(request);
+      if (options.chargeSummaryPermissionFailure) return route.fulfill({ status: 503, json: { detail: { code: "insufficient_permissions" } } });
+      if (options.chargeSummaryFailure) return route.fulfill({ status: 503, json: { detail: "unavailable" } });
+      return route.fulfill({ json: {
+        vehicle_id: Number(path.split("/").at(-2)), start: request.searchParams.get("start"), end: request.searchParams.get("end"),
+        total_count: 52, ended_count: 51, not_ended_count: 1, energy_added_kwh: 456.7, duration_min: 540, cost: options.displayCurrency ? 12.5 : null, currency: options.displayCurrency ?? null,
+        energy_added_coverage: { applicable_count: 51, valid_count: 50, reason: null }, duration_coverage: { applicable_count: 51, valid_count: 51, reason: null },
+        cost_coverage: { applicable_count: 51, valid_count: 49, reason: null }, cost_capability: { available: true, reason: null },
+        ...options.chargeSummaryResponse,
+      } });
+    }
     if (path.endsWith("/trips") || path.endsWith("/charges")) {
       lists.push(request);
       const trips = path.endsWith("/trips");
       const items = options.empty ? [] : trips
         ? [{ id: 1, vehicle_id: 1, start: "2026-03-29T00:30:00Z", end: "2026-03-29T01:30:00Z", duration_min: 60, distance_km: 12.5, speed_max_kmh: 72 }, { id: 2, vehicle_id: 1, start: "2026-09-13T10:00:00Z", end: null, duration_min: null, distance_km: null, speed_max_kmh: null }]
-        : [{ id: 1, vehicle_id: 1, start: "2026-09-12T20:00:00Z", end: "2026-09-12T20:45:00Z", duration_min: 45, energy_added_kwh: 22.5 }, { id: 2, vehicle_id: 2, start: "2026-09-13T20:00:00Z", end: null, duration_min: null, energy_added_kwh: null }];
-      return route.fulfill({ json: { items, next_cursor: trips && !options.empty && !request.searchParams.get("cursor") ? "cursor-1" : null, start: request.searchParams.get("start"), end: request.searchParams.get("end") } });
+        : options.chargeItems ?? [{ id: 1, vehicle_id: 1, start: "2026-09-12T20:00:00Z", end: "2026-09-12T20:45:00Z", duration_min: 45, energy_added_kwh: 22.5, place: "SYNTHETIC Supercharger", start_battery_level: 20, end_battery_level: 60, cost: 0 }, { id: 2, vehicle_id: 1, start: "2026-09-13T20:00:00Z", end: null, duration_min: null, energy_added_kwh: null, place: null, start_battery_level: null, end_battery_level: null, cost: null }, { id: 3, vehicle_id: 1, start: "2026-09-11T20:00:00Z", end: "2026-09-11T20:45:00Z", duration_min: 45, energy_added_kwh: 10, place: "SYNTHETIC Supercharger", start_battery_level: 30, end_battery_level: 50, cost: 12.5 }];
+      return route.fulfill({ json: { items, next_cursor: !options.empty && !request.searchParams.get("cursor") ? "cursor-1" : null, start: request.searchParams.get("start"), end: request.searchParams.get("end") } });
     }
     if (/\/trips\/1$/.test(path)) return route.fulfill({ json: { id: 1, vehicle_id: 1, start: "2026-03-29T00:30:00Z", end: "2026-03-29T01:30:00Z", duration_min: 60, distance_km: 12.5, speed_max_kmh: 72 } });
     if (/\/trips\/2$/.test(path)) return route.fulfill({ json: { id: 2, vehicle_id: 2, start: "2026-03-30T00:30:00Z", end: "2026-03-30T01:30:00Z", duration_min: 60, distance_km: 22, speed_max_kmh: 72 } });
@@ -552,6 +570,53 @@ test.describe("T18 compact trip list", () => {
     await expect(summary.getByText("2 条适用记录中的 2 条", { exact: true })).toBeVisible();
     await expect(summary.getByText("2 条适用记录中的 0 条", { exact: true })).toHaveCount(2);
     await expect(summary.getByText("此指标没有有效值可用。", { exact: true })).toHaveCount(2);
+  });
+});
+
+test.describe("T19 compact charge list", () => {
+  test("groups local dates, keeps the complete-period summary separate from 50-row pages, and distinguishes free from unknown cost", async ({ page }) => {
+    const summaryRequests = { requests: [] as URL[] };
+    const lists = await mockHistoryApi(page, { chargeSummaryRequests: summaryRequests });
+    await page.goto("/charges");
+    const summary = page.locator('[aria-label="Selected-period charge summary"]');
+    await expect(summary).toBeVisible();
+    await expect(summary.getByText("Currency not configured", { exact: true })).toBeVisible();
+    await expect(summary.getByText("49 of 51 applicable records", { exact: true })).toBeVisible();
+    await expect(page.getByText("Sunday, September 13, 2026", { exact: true })).toBeVisible();
+    await expect(page.getByText("0.00", { exact: true })).toBeVisible();
+    await expect(page.getByText("12.50", { exact: true })).toBeVisible();
+    await expect(page.getByText("Unknown", { exact: true })).toBeVisible();
+    await expect(page.getByText("Record not ended", { exact: true })).toBeVisible();
+    await expect.poll(() => lists.at(-1)?.searchParams.get("limit")).toBe("50");
+    await expect.poll(() => summaryRequests.requests.at(-1)?.searchParams.get("start")).toBe(lists.at(-1)?.searchParams.get("start"));
+    await page.getByRole("button", { name: "Next page", exact: true }).click();
+    await expect.poll(() => lists.at(-1)?.searchParams.get("cursor")).toBe("cursor-1");
+    expect(summaryRequests.requests).toHaveLength(1);
+  });
+
+  test("formats configured currency without converting source costs and keeps rows when only the summary fails", async ({ page }) => {
+    await mockHistoryApi(page, { displayCurrency: "EUR", chargeSummaryPermissionFailure: true, chargeItems: [{ id: 9, vehicle_id: 1, start: "2026-09-12T20:00:00Z", end: "2026-09-12T20:45:00Z", duration_min: 45, energy_added_kwh: 22.5, place: "SYNTHETIC Long Place", start_battery_level: 20, end_battery_level: 60, cost: 12.345 }] });
+    await page.goto("/charges");
+    await expect(page.getByText("The PostgreSQL account lacks required permissions.", { exact: true })).toBeVisible();
+    await expect(page.getByText(/€12\.35/)).toBeVisible();
+    await expect(page.getByRole("link", { name: "View details", exact: true })).toBeVisible();
+  });
+
+  test("renders unavailable charge coverage and has no horizontal phone overflow for long locations", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "mobile", "phone overflow assertion");
+    await mockHistoryApi(page, { chargeSummaryResponse: {
+      energy_added_kwh: null, duration_min: null,
+      energy_added_coverage: { applicable_count: 0, valid_count: 0, reason: "no_ended_records" },
+      duration_coverage: { applicable_count: 2, valid_count: 0, reason: "no_valid_values" },
+      cost_coverage: { applicable_count: 2, valid_count: 0, reason: "unavailable" },
+    }, chargeItems: [{ id: 4, vehicle_id: 1, start: "2026-09-12T20:00:00Z", end: "2026-09-12T20:45:00Z", duration_min: 45, energy_added_kwh: 22.5, place: "SYNTHETIC extraordinarily long charging location name that must be clipped on a narrow phone screen", start_battery_level: 20, end_battery_level: 60, cost: null }] });
+    await page.goto("/charges");
+    const summary = page.locator('[aria-label="Selected-period charge summary"]');
+    await expect(summary.getByText("No ended records are available for this metric.", { exact: true })).toBeVisible();
+    await expect(summary.getByText("No valid values are available for this metric.", { exact: true })).toBeVisible();
+    await expect(summary.getByText("This metric is unavailable.", { exact: true })).toBeVisible();
+    await expect(page.locator(".charge-place")).toHaveCSS("text-overflow", "ellipsis");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   });
 });
 

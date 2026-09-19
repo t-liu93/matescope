@@ -244,6 +244,14 @@ export const historyApi = {
         query: { start: window.start, end: window.end },
       },
     })),
+  chargeSummary: (window: HistoryWindow, options?: HistoryRequestOptions) =>
+    unwrap(api.GET("/api/v1/vehicles/{vehicle_id}/charge-summary", {
+      signal: options?.signal,
+      params: {
+        path: { vehicle_id: window.vehicleId! },
+        query: { start: window.start, end: window.end },
+      },
+    })),
   trip: (tripId: number, options?: HistoryRequestOptions) =>
     unwrap(api.GET("/api/v1/trips/{trip_id}", { signal: options?.signal, params: { path: { trip_id: tripId } } })),
   charge: (chargeId: number, options?: HistoryRequestOptions) =>
