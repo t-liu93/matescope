@@ -13,7 +13,7 @@ import {
 import { DatePickerInput } from "@mantine/dates";
 import { useMediaQuery } from "@mantine/hooks";
 import { useQuery } from "@tanstack/react-query";
-import { Component, lazy, Suspense, useEffect, useRef, useState } from "react";
+import { Component, Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
@@ -28,6 +28,7 @@ import { HistorySelectionGuard, useHistoryContext } from "./history-context";
 type Trip = components["schemas"]["Trip"];
 type Charge = components["schemas"]["Charge"];
 type HistoryPage = components["schemas"]["TripPage"] | components["schemas"]["ChargePage"];
+type TripPeriodSummary = components["schemas"]["TripPeriodSummary"];
 
 const TrajectoryMap = lazy(() => import("./trajectory-map"));
 
@@ -58,8 +59,8 @@ function formatDate(value: string | null, timezone: string) {
   }).format(new Date(value));
 }
 
-function value(value: number | null, unit: string) {
-  if (value === null) return <span className="metric-value metric-value-empty">—</span>;
+function value(value: number | null | undefined, unit: string) {
+  if (value == null) return <span className="metric-value metric-value-empty">—</span>;
   const formatted = value.toLocaleString(undefined, { maximumFractionDigits: 1 });
   return (
     <span className="metric" aria-label={`${formatted} ${unit}`}>
@@ -69,12 +70,52 @@ function value(value: number | null, unit: string) {
   );
 }
 
-function HistoryFailure({ retry }: { retry: () => void }) {
+function whole(value: number | null | undefined) {
+  if (value == null) return <span className="metric-value metric-value-empty">—</span>;
+  return <span className="metric-value">{Math.round(value).toLocaleString()}</span>;
+}
+
+function duration(value: number | null | undefined) {
+  if (value == null) return <span className="metric-value metric-value-empty">—</span>;
+  const minutes = Math.round(value);
+  const hours = Math.floor(minutes / 60);
+  return <span className="metric-value">{hours ? `${hours}h ${minutes % 60}m` : `${minutes}m`}</span>;
+}
+
+function localDay(value: string, timezone: string) {
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeZone: timezone }).format(new Date(value));
+}
+
+export function MetricCoverage({ coverage, t }: { coverage: components["schemas"]["MetricCoverage"]; t: (key: string, options?: Record<string, unknown>) => string }) {
+  const reasonKeys = {
+    no_ended_records: "metricNoEndedRecords",
+    no_valid_values: "metricNoValidValues",
+    zero_denominator: "metricZeroDenominator",
+    unavailable: "metricUnavailable",
+  } as const;
+  return <Stack gap={0}>
+    <Text size="xs" c="dimmed">{t("metricCoverage", { valid: coverage.valid_count, applicable: coverage.applicable_count })}</Text>
+    {coverage.reason && <Text size="xs" c="dimmed">{t(reasonKeys[coverage.reason])}</Text>}
+  </Stack>;
+}
+
+function HistoryFailure({ retry, error }: { retry: () => void; error?: unknown }) {
   const { t } = useTranslation();
+  const sourceMessages: Record<string, string> = {
+    unconfigured: "testCodeUnconfigured", disabled: "testCodeDisabled", skipped: "testCodeSkipped",
+    invalid_credentials: "testCodeInvalidCredentials", unavailable: "testCodeUnavailable", timeout: "testCodeTimeout",
+    incompatible_schema: "testCodeIncompatibleSchema", unsafe_permissions: "testCodeUnsafePermissions",
+    insufficient_permissions: "testCodeInsufficientPermissions",
+  };
+  const sourceCode = error instanceof ApiError
+    ? error.sourceCode
+    : (typeof error === "object" && error !== null && "sourceCode" in error && typeof error.sourceCode === "string" ? error.sourceCode : undefined);
+  const sourceMessage = sourceCode ? sourceMessages[sourceCode] : undefined;
   return (
     <Alert color="red">
       <Stack gap="xs">
         <Text>{t("historyLoadFailed")}</Text>
+        {sourceMessage && <Text size="sm">{t(sourceMessage)}</Text>}
         <Button variant="light" onClick={retry}>{t("retry")}</Button>
       </Stack>
     </Alert>
@@ -84,6 +125,24 @@ function HistoryFailure({ retry }: { retry: () => void }) {
 function OfflineVehicleData() {
   const { t } = useTranslation();
   return <Container py="xl"><Alert color="yellow">{t("offlineVehicleData")}</Alert></Container>;
+}
+
+function TripSummary({ summary, pending, error, retry }: { summary?: TripPeriodSummary; pending: boolean; error: unknown; retry: () => void }) {
+  const { t } = useTranslation();
+  if (pending) return <Card withBorder radius="md"><Text>{t("loading")}</Text></Card>;
+  if (error || !summary) return <HistoryFailure retry={retry} error={error} />;
+  return <Card withBorder radius="md" aria-label={t("tripPeriodSummary")}>
+    <Stack gap="sm">
+      <Title order={2}>{t("tripPeriodSummary")}</Title>
+      <SimpleGrid cols={{ base: 2, md: 4 }} spacing="sm">
+        <div><Text size="sm" c="dimmed">{t("records")}</Text><Text>{summary.total_count.toLocaleString()}</Text></div>
+        <div><Text size="sm" c="dimmed">{t("distance")}</Text><Text>{value(summary.distance_km, "km")}</Text><MetricCoverage coverage={summary.distance_coverage} t={t} /></div>
+        <div><Text size="sm" c="dimmed">{t("duration")}</Text><Text>{duration(summary.duration_min)}</Text><MetricCoverage coverage={summary.duration_coverage} t={t} /></div>
+        <div><Text size="sm" c="dimmed">{t("estimatedEnergy")}</Text><Text>{value(summary.estimated_energy_kwh, "kWh")}</Text><MetricCoverage coverage={summary.estimated_energy_coverage} t={t} /></div>
+      </SimpleGrid>
+      {summary.not_ended_count > 0 && <Text size="sm" c="dimmed">{t("notEndedExcluded", { count: summary.not_ended_count })}</Text>}
+    </Stack>
+  </Card>;
 }
 
 function HistoryFilters({
@@ -180,11 +239,16 @@ function HistoryList({ kind }: { kind: "trips" | "charges" }) {
   useEffect(() => { if (scopedWindow) setDraft(scopedWindow); }, [scopedWindow]);
   useEffect(() => { setCursors([]); setCursorScope(scope); }, [scope]);
   const query = useQuery<HistoryPage>({
-    queryKey: [kind, scopedWindow, cursor],
+    queryKey: [kind, vehicle?.id, scopedWindow?.start, scopedWindow?.end, preferences.data?.preferences?.range_basis, cursor],
     queryFn: ({ signal }) => kind === "trips"
       ? historyApi.trips({ ...scopedWindow!, vehicleId: vehicle!.id, cursor }, { signal })
       : historyApi.charges({ ...scopedWindow!, vehicleId: vehicle!.id, cursor }, { signal }),
     enabled: online && !emptyWindow && Boolean(preferences.data?.preferences?.saved) && Boolean(vehicle && scopedWindow),
+  });
+  const tripSummary = useQuery<TripPeriodSummary>({
+    queryKey: ["trip-summary", vehicle?.id, scopedWindow?.start, scopedWindow?.end, preferences.data?.preferences?.range_basis],
+    queryFn: ({ signal }) => historyApi.tripSummary({ ...scopedWindow!, vehicleId: vehicle!.id }, { signal }),
+    enabled: kind === "trips" && online && !emptyWindow && Boolean(preferences.data?.preferences?.saved) && Boolean(vehicle && scopedWindow),
   });
   const clear = () => {
     if (scopedWindow) setDraft(scopedWindow);
@@ -201,24 +265,12 @@ function HistoryList({ kind }: { kind: "trips" | "charges" }) {
         <Title order={1}>{t(kind)}</Title>
         <Text size="sm" c="dimmed">{t("timesShownIn", { timezone })}</Text>
         <HistoryFilters window={draft} clear={clear} timezone={timezone} />
+        {kind === "trips" && !emptyWindow && <TripSummary summary={tripSummary.data} pending={tripSummary.isPending} error={tripSummary.error} retry={() => void tripSummary.refetch()} />}
         {query.isPending && <Text>{t("loading")}</Text>}
         {query.error && <HistoryFailure retry={() => void query.refetch()} />}
         {(emptyWindow || page?.items.length === 0) && <Alert>{t("noHistory")}</Alert>}
-        {page?.items.map((item) => (
-          <Card key={item.id} withBorder radius="md">
-            <Stack gap="xs">
-              <Group justify="space-between" align="start">
-                <Text fw={600}>{formatDate(item.start, timezone)}</Text>
-                <Text c="dimmed">{t("vehicle")} {item.vehicle_id}</Text>
-              </Group>
-              <Text>{item.end ? `${formatDate(item.start, timezone)} – ${formatDate(item.end, timezone)}` : t("unfinished")}</Text>
-              <Group gap="md">
-                <Text>{value(item.duration_min, "min")}</Text>
-                {kind === "trips" ? <><Text>{value((item as Trip).distance_km, "km")}</Text><Text>{value((item as Trip).speed_max_kmh, "km/h")}</Text></> : <Text>{value((item as Charge).energy_added_kwh, "kWh")}</Text>}
-              </Group>
-              <Button component={Link} variant="light" to={historyPath(`/${kind}/${item.id}`)}>{t("viewDetails")}</Button>
-            </Stack>
-          </Card>
+        {kind === "trips" ? <TripRows items={(page?.items ?? []) as Trip[]} timezone={timezone} historyPath={historyPath} /> : page?.items.map((item) => (
+          <Card key={item.id} withBorder radius="md"><Stack gap="xs"><Text fw={600}>{formatDate(item.start, timezone)}</Text><Text>{item.end ? `${formatDate(item.start, timezone)} – ${formatDate(item.end, timezone)}` : t("unfinished")}</Text><Text>{value((item as Charge).energy_added_kwh, "kWh")}</Text><Button component={Link} variant="light" to={historyPath(`/${kind}/${item.id}`)}>{t("viewDetails")}</Button></Stack></Card>
         ))}
         <Group>
           {activeCursors.length > 0 && <Button variant="light" onClick={() => { setCursorScope(scope); setCursors((value) => [...value].slice(0, -1)); }}>{t("previousPage")}</Button>}
@@ -227,6 +279,36 @@ function HistoryList({ kind }: { kind: "trips" | "charges" }) {
       </Stack>
     </Container>
   );
+}
+
+function TripRows({ items, timezone, historyPath }: { items: Trip[]; timezone: string; historyPath: (pathname: string) => string }) {
+  const { t } = useTranslation();
+  const desktop = useMediaQuery("(min-width: 1200px)");
+  const groups = useMemo(() => {
+    const ordered = [...items].sort((a, b) => b.start.localeCompare(a.start) || b.id - a.id);
+    return ordered.reduce<{ label: string; items: Trip[] }[]>((acc, item) => {
+      const label = localDay(item.start, timezone);
+      const group = acc.at(-1);
+      if (group?.label === label) group.items.push(item); else acc.push({ label, items: [item] });
+      return acc;
+    }, []);
+  }, [items, timezone]);
+  return <Stack gap="sm">{groups.map((group) => <Fragment key={group.label}>
+    <Text fw={600} size="sm" c="dimmed">{group.label}</Text>
+    {group.items.map((item) => <Card key={item.id} withBorder radius="md" className="trip-list-card">
+      <Stack gap="xs">
+        <Group justify="space-between" align="start" wrap="nowrap"><Text fw={600}>{formatDate(item.start, timezone)}</Text><Text size="sm" c="dimmed">{item.end ? duration(item.duration_min) : t("recordNotEnded")}</Text></Group>
+        <Text className="trip-place" title={`${item.start_place ?? t("unknownLocation")} → ${item.end_place ?? t("unknownLocation")}`}>{item.start_place ?? t("unknownLocation")} <span aria-hidden="true">→</span> {item.end_place ?? t("unknownLocation")}</Text>
+        <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="xs">
+          <Text>{t("distance")}: {value(item.distance_km, "km")}</Text>
+          <Text>{t("soc")}: {whole(item.start_battery_level)} → {whole(item.end_battery_level)}</Text>
+          <Text>{t("estimatedEnergy")}: {value(item.estimated_energy_kwh, "kWh")}</Text>
+          {desktop && <Text>{t("estimatedConsumption")}: {value(item.estimated_average_consumption_wh_per_km, "Wh/km")}</Text>}
+        </SimpleGrid>
+        <Button component={Link} variant="light" to={historyPath(`/trips/${item.id}`)}>{t("viewDetails")}</Button>
+      </Stack>
+    </Card>)}
+  </Fragment>)}</Stack>;
 }
 
 function DetailValues({ item, kind, timezone }: { item: Trip | Charge; kind: "trips" | "charges"; timezone: string }) {

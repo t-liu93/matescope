@@ -118,6 +118,10 @@ type MockOptions = {
   historyWindowRequests?: { requests: URL[] };
   preferenceBodies?: { bodies: Record<string, unknown>[] };
   deferredHistoryWindow?: { preset: string; vehicleId?: number; started: { count: number }; release: Promise<void> };
+  tripSummaryFailure?: boolean;
+  tripSummaryPermissionFailure?: boolean;
+  tripSummaryRequests?: { requests: URL[] };
+  tripSummaryResponse?: Record<string, unknown>;
 };
 async function mockHistoryApi(page: Page, options: MockOptions = {}) {
   const lists: URL[] = [];
@@ -162,6 +166,20 @@ async function mockHistoryApi(page: Page, options: MockOptions = {}) {
       const custom = preset === "custom";
       return route.fulfill({ json: { preset, timezone: "Europe/Amsterdam", start: custom ? "2026-01-01T00:00:00Z" : preset === "all_history" ? null : "2026-08-14T00:00:00Z", end: "2026-09-13T00:00:00Z", is_empty: options.empty ?? false } });
     }
+    if (/\/vehicles\/\d+\/trip-summary$/.test(path)) {
+      options.tripSummaryRequests?.requests.push(request);
+      if (options.tripSummaryPermissionFailure) return route.fulfill({ status: 503, json: { detail: { code: "insufficient_permissions" } } });
+      if (options.tripSummaryFailure) return route.fulfill({ status: 503, json: { detail: "unavailable" } });
+      return route.fulfill({ json: {
+        vehicle_id: Number(path.split("/").at(-2)), start: request.searchParams.get("start"), end: request.searchParams.get("end"),
+        total_count: 52, ended_count: 51, not_ended_count: 1, distance_km: 456.7, duration_min: 540, estimated_energy_kwh: 78.9,
+        estimated_average_consumption_wh_per_km: 172.8,
+        distance_coverage: { applicable_count: 51, valid_count: 50 }, duration_coverage: { applicable_count: 51, valid_count: 51 },
+        estimated_energy_coverage: { applicable_count: 51, valid_count: 49 }, estimated_average_consumption_coverage: { applicable_count: 51, valid_count: 49 },
+        estimate_capability: { available: true, reason: null },
+        ...options.tripSummaryResponse,
+      } });
+    }
     if (path.endsWith("/trips") || path.endsWith("/charges")) {
       lists.push(request);
       const trips = path.endsWith("/trips");
@@ -193,10 +211,10 @@ test.describe("T09 calendar history filters", () => {
     await page.getByRole("button", { name: "Apply", exact: true }).click();
     await expect.poll(() => lists.at(-1)?.searchParams.get("vehicle_id")).toBe("1");
     await expect.poll(() => lists.at(-1)?.searchParams.get("start")).toBe("2026-08-14T00:00:00Z");
-    await expect(page.getByText("Unfinished", { exact: true })).toBeVisible();
+    await expect(page.getByText("Record not ended", { exact: true })).toBeVisible();
     await expect(page.getByText("—", { exact: true }).first()).toBeVisible();
     await expect(page.getByText("Mar 29, 2026, 1:30 AM", { exact: true })).toBeVisible();
-    await expect(page.getByText("Mar 29, 2026, 1:30 AM – Mar 29, 2026, 3:30 AM", { exact: true })).toBeVisible();
+    await expect(page.getByText("Mar 29, 2026, 1:30 AM", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Next page", exact: true }).click();
     await expect.poll(() => lists.at(-1)?.searchParams.get("cursor")).toBe("cursor-1");
     await expect.poll(() => lists.at(-1)?.searchParams.get("start")).toBe("2026-08-14T00:00:00Z");
@@ -475,6 +493,65 @@ test.describe("T09 calendar history filters", () => {
     await page.goto("/settings");
     await page.getByRole("button", { name: "Sign out", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
+  });
+});
+
+test.describe("T18 compact trip list", () => {
+  test("groups local dates, uses the complete-period summary, and retains 50-row cursor paging", async ({ page }) => {
+    const summaryRequests = { requests: [] as URL[] };
+    const lists = await mockHistoryApi(page, { tripSummaryRequests: summaryRequests });
+    await page.goto("/trips");
+    await expect(page.locator('[aria-label="Selected-period trip summary"]')).toBeVisible();
+    await expect(page.getByText("456.7 km", { exact: false })).toBeVisible();
+    await expect(page.getByText("1 record not ended is excluded from ended-record totals.", { exact: true })).toBeVisible();
+    await expect.poll(() => lists.at(-1)?.searchParams.get("limit")).toBe("50");
+    await expect.poll(() => summaryRequests.requests.at(-1)?.searchParams.get("start")).toBe(lists.at(-1)?.searchParams.get("start"));
+    await expect(page.getByText("Sunday, September 13, 2026", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Next page", exact: true }).click();
+    await expect.poll(() => lists.at(-1)?.searchParams.get("cursor")).toBe("cursor-1");
+    expect(summaryRequests.requests).toHaveLength(1);
+  });
+
+  test("keeps trip rows available when only the summary fails", async ({ page }) => {
+    await mockHistoryApi(page, { tripSummaryPermissionFailure: true });
+    await page.goto("/trips");
+    await expect(page.getByText("We could not load history. Please try again.", { exact: true })).toBeVisible();
+    await expect(page.getByText("The PostgreSQL account lacks required permissions.", { exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "View details", exact: true }).first()).toBeVisible();
+  });
+
+  test("always shows trip metric coverage and English unavailable reasons", async ({ page }) => {
+    await mockHistoryApi(page, { tripSummaryResponse: {
+      distance_km: null,
+      duration_min: null,
+      estimated_energy_kwh: null,
+      distance_coverage: { applicable_count: 0, valid_count: 0, reason: "no_ended_records" },
+      duration_coverage: { applicable_count: 0, valid_count: 0, reason: "no_valid_values" },
+      estimated_energy_coverage: { applicable_count: 3, valid_count: 0, reason: "unavailable" },
+    } });
+    await page.goto("/trips");
+    const summary = page.locator('[aria-label="Selected-period trip summary"]');
+    await expect(summary.getByText("0 of 0 applicable records", { exact: true })).toHaveCount(2);
+    await expect(summary.getByText("0 of 3 applicable records", { exact: true })).toBeVisible();
+    await expect(summary.getByText("No ended records are available for this metric.", { exact: true })).toBeVisible();
+    await expect(summary.getByText("No valid values are available for this metric.", { exact: true })).toBeVisible();
+    await expect(summary.getByText("This metric is unavailable.", { exact: true })).toBeVisible();
+    await expect(summary.getByText("—", { exact: true })).toHaveCount(3);
+  });
+
+  test("keeps full and partial coverage visible with Chinese reasons", async ({ page }) => {
+    await mockHistoryApi(page, { language: "zh", tripSummaryResponse: {
+      distance_coverage: { applicable_count: 2, valid_count: 2, reason: null },
+      duration_min: null,
+      duration_coverage: { applicable_count: 2, valid_count: 0, reason: "no_valid_values" },
+      estimated_energy_kwh: null,
+      estimated_energy_coverage: { applicable_count: 2, valid_count: 0, reason: "no_valid_values" },
+    } });
+    await page.goto("/trips");
+    const summary = page.locator('[aria-label="所选期间行程摘要"]');
+    await expect(summary.getByText("2 条适用记录中的 2 条", { exact: true })).toBeVisible();
+    await expect(summary.getByText("2 条适用记录中的 0 条", { exact: true })).toHaveCount(2);
+    await expect(summary.getByText("此指标没有有效值可用。", { exact: true })).toHaveCount(2);
   });
 });
 

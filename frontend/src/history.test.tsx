@@ -1,0 +1,47 @@
+import { cleanup, render, screen } from "@testing-library/react";
+import { MantineProvider } from "@mantine/core";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { MetricCoverage } from "./history";
+import i18n from "./i18n";
+
+function renderCoverage(coverage: Parameters<typeof MetricCoverage>[0]["coverage"]) {
+  return render(<MantineProvider><MetricCoverage coverage={coverage} t={i18n.t.bind(i18n)} /></MantineProvider>);
+}
+
+afterEach(() => {
+  cleanup();
+  void i18n.changeLanguage("en");
+});
+
+describe("MetricCoverage", () => {
+  it("always renders valid/applicable counts and localizes every unavailable reason", async () => {
+    const cases = [
+      ["no_ended_records", "No ended records are available for this metric.", "此指标没有已结束的记录可用。"],
+      ["no_valid_values", "No valid values are available for this metric.", "此指标没有有效值可用。"],
+      ["zero_denominator", "This metric cannot be calculated because its denominator is zero.", "此指标的分母为零，无法计算。"],
+      ["unavailable", "This metric is unavailable.", "此指标不可用。"],
+    ] as const;
+
+    for (const [reason, english, chinese] of cases) {
+      const { unmount } = renderCoverage({ applicable_count: 0, valid_count: 0, reason });
+      expect(screen.getByText("0 of 0 applicable records", { exact: true })).toBeVisible();
+      expect(screen.getByText(english, { exact: true })).toBeVisible();
+      unmount();
+
+      await i18n.changeLanguage("zh");
+      const chineseView = renderCoverage({ applicable_count: 0, valid_count: 0, reason });
+      expect(screen.getByText("0 条适用记录中的 0 条", { exact: true })).toBeVisible();
+      expect(screen.getByText(chinese, { exact: true })).toBeVisible();
+      chineseView.unmount();
+      await i18n.changeLanguage("en");
+    }
+  });
+
+  it("keeps full and partial coverage visible without an unavailable reason", () => {
+    const { rerender } = renderCoverage({ applicable_count: 2, valid_count: 2, reason: null });
+    expect(screen.getByText("2 of 2 applicable records", { exact: true })).toBeVisible();
+    rerender(<MantineProvider><MetricCoverage coverage={{ applicable_count: 2, valid_count: 1, reason: null }} t={i18n.t.bind(i18n)} /></MantineProvider>);
+    expect(screen.getByText("1 of 2 applicable records", { exact: true })).toBeVisible();
+  });
+});
