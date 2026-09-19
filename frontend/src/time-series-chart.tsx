@@ -11,7 +11,7 @@ type TimeSeries = components["schemas"]["TimeSeries"];
 function formatValue(value: number | null | undefined, unit: string) {
   return value === null || value === undefined
     ? "—"
-    : `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value)} ${unit}`;
+    : `${new Intl.NumberFormat(undefined, { maximumFractionDigits: unit === "%" ? 0 : 2 }).format(value)} ${unit}`;
 }
 
 function SeriesDescription({ series, timezone }: { series: TimeSeries; timezone: string }) {

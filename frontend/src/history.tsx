@@ -26,7 +26,7 @@ import i18n from "./i18n";
 import { useOnlineStatus } from "./pwa";
 import { HistorySelectionGuard, useHistoryContext } from "./history-context";
 import { historyReturn, historyScope, previousCursor, rememberCursor, rememberHistoryReturn } from "./history-navigation";
-import { DualTimeSeriesChart } from "./time-series-chart";
+import { DualTimeSeriesChart, TimeSeriesChart } from "./time-series-chart";
 
 type Trip = components["schemas"]["Trip"];
 type Charge = components["schemas"]["Charge"];
@@ -489,14 +489,25 @@ function HistoryDetail({ kind }: { kind: "trips" | "charges" }) {
       {trajectory.data?.simplified && <Text size="sm" c="dimmed">{t("trajectorySimplified", { count: trajectory.data.total_points })}</Text>}
       </Stack></Card>}
     </div>
-    {kind === "trips" && <Card key={`series-${identifier}`} withBorder radius="md"><Stack gap="sm"><Title order={2}>{t("tripSpeedPower")}</Title>
+    {kind === "trips" && <Card key={`series-${identifier}`} withBorder radius="md"><Stack gap="sm">
       {tripSeries.isPending && <Text>{t("loading")}</Text>}
       {tripSeries.error && <Alert color="yellow">{t("tripSeriesUnavailable")}</Alert>}
       {tripSeries.data && (() => {
         const speed = tripSeries.data.series.find((series) => series.name === "speed");
         const power = tripSeries.data.series.find((series) => series.name === "power");
-        if (!speed || !power) return <Alert color="yellow">{t("tripSeriesUnavailable")}</Alert>;
-        return <DualTimeSeriesChart first={speed} second={power} timezone={timezone} title={t("tripSpeedPower")} firstTitle={t("speed")} secondTitle={t("power")} />;
+        const battery = tripSeries.data.series.find((series) => series.name === "battery");
+        return <div className="trip-chart-section">
+          <Card withBorder radius="sm"><Stack gap="sm"><Title order={2}>{t("tripSpeedPower")}</Title>
+            {!speed || !power
+              ? <Alert color="yellow">{t("tripSeriesUnavailable")}</Alert>
+              : <DualTimeSeriesChart first={speed} second={power} timezone={timezone} title={t("tripSpeedPower")} firstTitle={t("speed")} secondTitle={t("power")} />}
+          </Stack></Card>
+          <Card withBorder radius="sm"><Stack gap="sm"><Title order={2}>{t("tripSoc")}</Title>
+            {!battery
+              ? <Alert color="yellow">{t("tripSocUnavailable")}</Alert>
+              : <TimeSeriesChart series={battery} timezone={timezone} title={t("tripSoc")} />}
+          </Stack></Card>
+        </div>;
       })()}
     </Stack></Card>}
   </Stack></Container>;

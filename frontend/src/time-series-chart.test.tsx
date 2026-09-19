@@ -86,7 +86,7 @@ describe("TimeSeriesChart", () => {
       name: "battery",
       unit: "%",
       aggregation: "last",
-      points: [{ time: "2026-03-29T00:00:00Z", value: 68, discontinuity: false }],
+      points: [{ time: "2026-03-29T00:00:00Z", value: 67.6, discontinuity: false }],
     };
     await i18n.changeLanguage("zh");
     render(<MantineProvider><TimeSeriesChart series={series} timezone="UTC" title="电量" /></MantineProvider>);

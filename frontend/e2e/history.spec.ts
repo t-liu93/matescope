@@ -216,6 +216,7 @@ async function mockHistoryApi(page: Page, options: MockOptions = {}) {
         trip_id: 1, capability: { available: true, reason: null }, series: [
           { name: "speed", unit: "km/h", start: "2026-03-29T00:30:00Z", end: "2026-03-29T01:40:00Z", sample_count: 4, bucket_count: 4, aggregation: "mean_min_max", capability: { available: true, reason: null }, points: [{ time: "2026-03-29T00:30:00Z", mean: 38, min: 35, max: 42, value: 38, discontinuity: false }, { time: "2026-03-29T00:40:00Z", mean: 64, min: 60, max: 67, value: 64, discontinuity: false }, { time: "2026-03-29T01:30:00Z", mean: 0, min: 0, max: 0, value: 0, discontinuity: true }, { time: "2026-03-29T01:40:00Z", mean: 20, min: 18, max: 22, value: 20, discontinuity: false }] },
           { name: "power", unit: "kW", start: "2026-03-29T00:30:00Z", end: "2026-03-29T01:40:00Z", sample_count: 4, bucket_count: 4, aggregation: "mean_min_max", capability: { available: true, reason: null }, points: [{ time: "2026-03-29T00:30:00Z", mean: -8.4, min: -9, max: -8, value: -8.4, discontinuity: false }, { time: "2026-03-29T00:40:00Z", mean: -16.2, min: -17, max: -15, value: -16.2, discontinuity: false }, { time: "2026-03-29T01:30:00Z", mean: null, min: null, max: null, value: null, discontinuity: true }, { time: "2026-03-29T01:40:00Z", mean: -10, min: -12, max: -8, value: -10, discontinuity: false }] },
+          { name: "battery", unit: "%", start: "2026-03-29T00:30:00Z", end: "2026-03-29T01:40:00Z", sample_count: 4, bucket_count: 4, aggregation: "last", capability: { available: true, reason: null }, points: [{ time: "2026-03-29T00:30:00Z", value: 82, discontinuity: false }, { time: "2026-03-29T00:40:00Z", value: 78, discontinuity: false }, { time: "2026-03-29T01:30:00Z", value: null, discontinuity: true }, { time: "2026-03-29T01:40:00Z", value: 68, discontinuity: false }] },
         ],
       } });
     }
@@ -571,11 +572,11 @@ test.describe("T25 trip speed and power", () => {
     await expect(page.getByRole("heading", { name: "Speed and power", exact: true })).toBeVisible();
     await expect(page.getByText(/Speed \(km\/h\): Values use km\/h/)).toBeVisible();
     await expect(page.getByText(/Power \(kW\): Values use kW/)).toBeVisible();
-    await page.getByText("Chart data table", { exact: true }).click();
+    await page.getByRole("figure", { name: "Speed and power" }).getByText("Chart data table", { exact: true }).click();
     await expect(page.getByText("-8.4 kW", { exact: true })).toBeVisible();
     await expect(page.getByText("Data gap: 0 km/h", { exact: true })).toBeVisible();
-    const paths = page.locator("path.recharts-line-curve");
-    await expect(paths).toHaveCount(2);
+    const paths = page.locator(".trip-chart-section .time-series-plot path.recharts-line-curve");
+    await expect(paths).toHaveCount(3);
     for (const path of await paths.all()) {
       await expect(path).toHaveAttribute("d", /.+/);
       expect((await path.getAttribute("d"))?.match(/M/g)?.length).toBeGreaterThanOrEqual(2);
@@ -584,6 +585,20 @@ test.describe("T25 trip speed and power", () => {
     expect(chartLabels.some((label) => label.includes("2026"))).toBe(true);
     expect(chartLabels.join(" ")).not.toContain("1970");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  });
+
+  test("renders battery level as a separate percent chart with the trip time range", async ({ page }) => {
+    await mockHistoryApi(page);
+    await localTiles(page);
+    await page.goto("/trips/1");
+    await expect(page.getByRole("heading", { name: "Battery level", exact: true })).toBeVisible();
+    const batteryChart = page.getByRole("figure", { name: "Battery level" });
+    await expect(batteryChart.getByText(/Values use %/)).toBeVisible();
+    await batteryChart.getByText("Chart data table", { exact: true }).click();
+    await expect(batteryChart.getByText("68 %", { exact: true })).toBeVisible();
+    const batteryLabelText = await batteryChart.locator(".time-series-plot svg text").allTextContents();
+    expect(batteryLabelText.some((label) => label.includes("2026"))).toBe(true);
+    expect(batteryLabelText.join(" ")).not.toContain("1970");
   });
 
   test("keeps the summary and route usable when the series request fails", async ({ page }) => {
