@@ -71,12 +71,35 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .trajectory-map { height: min(52vh, 420px); min-height: 240px; width: 100%; }
 .shell-header { padding-inline: 8px; }
 .shell-header-actions .mantine-Button-root { min-height: 44px; padding-inline: 8px; }
+.shell-vehicle-select { width: min(11rem, 38vw); }
+.shell-vehicle-name { max-width: min(11rem, 38vw); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shell-sidebar .shell-vehicle-select { width: 100%; }
+.shell-sidebar .shell-vehicle-name { max-width: 100%; }
+.shell-navigation { display: flex; }
+.shell-navigation-sidebar { flex-direction: column; gap: 4px; }
+.shell-navigation-sidebar .mantine-NavLink-root { min-height: 44px; }
+.shell-sidebar-settings { margin-top: auto; }
+.shell-bottom-bar { display: none; padding-bottom: env(safe-area-inset-bottom); }
+.shell-navigation-bottom { height: 64px; align-items: center; justify-content: space-around; }
+.shell-navigation-bottom .mantine-Button-root { min-height: 44px; flex: 1; }
 
 @media (max-width: 30rem) {
   .mantine-Container-root { padding-inline: 16px; }
   .shell-header { padding-inline: 4px; }
   .shell-header-actions { gap: 0; }
   .shell-header-actions .mantine-Button-root { padding-inline: 6px; }
+}
+
+@media (max-width: 47.99rem) {
+  .shell-bottom-bar { display: block; }
+  .shell-sidebar { display: none; }
+  .shell-header-actions .mantine-Button-root { font-size: 0.875rem; }
+  .mantine-AppShell-main { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+}
+
+@media (min-width: 48rem) {
+  .shell-header .shell-vehicle-select,
+  .shell-header .shell-vehicle-name { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

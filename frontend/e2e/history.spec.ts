@@ -342,14 +342,15 @@ test.describe("T09 calendar history filters", () => {
     await localTiles(page);
     await page.goto("/vehicles");
     await expect(page.getByRole("heading", { name: "车辆", exact: true })).toBeVisible();
-    await expect(page.getByText("SYNTHETIC Atlas", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "历史记录导航", exact: true }).click();
-    for (const name of ["车辆", "行程", "充电"])
-      await expect(page.getByRole("menuitem", { name, exact: true })).toBeVisible();
+    await expect(page.getByRole("main").getByText("SYNTHETIC Atlas", { exact: true })).toBeVisible();
+    const navigation = page.getByRole("navigation", { name: "主导航", exact: true });
+    await expect(navigation.getByRole("link", { name: "行程", exact: true })).toBeVisible();
+    await expect(navigation.getByRole("link", { name: "充电", exact: true })).toBeVisible();
+    await expect(navigation.getByRole("link", { name: "车辆", exact: true })).toHaveCount(0);
     await expect.poll(() => settingsRequests.count).toBe(1);
     await page.reload();
     await expect(page.getByRole("heading", { name: "车辆", exact: true })).toBeVisible();
-    await expect(page.getByText("SYNTHETIC Atlas", { exact: true })).toBeVisible();
+    await expect(page.getByRole("main").getByText("SYNTHETIC Atlas", { exact: true })).toBeVisible();
     await expect.poll(() => settingsRequests.count).toBe(2);
   });
 
@@ -362,18 +363,47 @@ test.describe("T09 calendar history filters", () => {
     await expect(page.getByText("We could not load history. Please try again.")).toBeVisible();
     expect(vehicleRequests.count).toBe(0);
     await page.getByRole("button", { name: "Retry", exact: true }).click();
-    await expect(page.getByText("SYNTHETIC Atlas", { exact: true })).toBeVisible();
+    await expect(page.getByRole("main").getByText("SYNTHETIC Atlas", { exact: true })).toBeVisible();
     expect(vehicleRequests.count).toBe(1);
   });
 
-  test("mobile navigation exposes all history routes", async ({ page }, testInfo) => {
+  test("mobile navigation exposes only implemented primary routes", async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "mobile", "mobile-only navigation assertion");
     await mockHistoryApi(page);
     await localTiles(page);
     await page.goto("/trips");
-    await page.getByRole("button", { name: "History navigation", exact: true }).click();
-    for (const name of ["Vehicles", "Trips", "Charges"])
-      await expect(page.getByRole("menuitem", { name, exact: true })).toBeVisible();
+    const navigation = page.getByRole("navigation", { name: "Primary navigation", exact: true });
+    await expect(navigation.getByRole("link", { name: "Trips", exact: true })).toBeVisible();
+    await expect(navigation.getByRole("link", { name: "Charges", exact: true })).toBeVisible();
+    await expect(navigation.getByRole("link")).toHaveCount(2);
+  });
+
+  test("uses the phone header and safe-area bottom bar for shared selection", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "mobile", "mobile shell assertion");
+    await mockHistoryApi(page);
+    await localTiles(page);
+    await page.goto("/trips");
+    await expect(page.getByRole("textbox", { name: "Select vehicle", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Settings", exact: true })).toBeVisible();
+    const navigation = page.getByRole("navigation", { name: "Primary navigation", exact: true });
+    await expect(navigation).toBeVisible();
+    await expect(navigation).toHaveCSS("padding-bottom", "0px");
+    await navigation.getByRole("link", { name: "Charges", exact: true }).click();
+    await expect(page).toHaveURL(/\/charges\?vehicle=1/);
+  });
+
+  test("uses the sidebar at tablet and desktop widths", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop", "desktop shell assertion");
+    await mockHistoryApi(page);
+    await localTiles(page);
+    await page.setViewportSize({ width: 768, height: 900 });
+    await page.goto("/trips");
+    const navigation = page.getByRole("navigation", { name: "Primary navigation", exact: true });
+    await expect(navigation).toBeVisible();
+    await expect(navigation.getByRole("link")).toHaveCount(2);
+    await expect(page.getByRole("textbox", { name: "Select vehicle", exact: true })).toBeVisible();
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await expect(navigation).toBeVisible();
   });
 
   test("keeps a fixed scoped window across navigation and establishes the detail owner", async ({ page }) => {
@@ -381,8 +411,8 @@ test.describe("T09 calendar history filters", () => {
     await localTiles(page);
     await page.goto("/trips?vehicle=2&start=2026-01-01T00%3A00%3A00Z&end=2026-02-01T00%3A00%3A00Z");
     await expect.poll(() => lists.at(-1)?.searchParams.get("vehicle_id")).toBe("2");
-    await page.getByRole("button", { name: "History navigation", exact: true }).click();
-    await page.getByRole("menuitem", { name: "Charges", exact: true }).click();
+    await page.getByRole("navigation", { name: "Primary navigation", exact: true })
+      .getByRole("link", { name: "Charges", exact: true }).click();
     await expect(page).toHaveURL(/vehicle=2.*start=2026-01-01T00/);
     await page.goto("/trips/1");
     await expect(page.getByText(/12\.5 km/)).toBeVisible();
@@ -476,13 +506,13 @@ test.describe("T10 visual foundations", () => {
     }
   });
 
-  test("keeps the navigation menu touchable and keyboard focus visible", async ({ page }) => {
+  test("keeps sidebar navigation touchable and keyboard focus visible", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop", "desktop sidebar assertion");
     await mockHistoryApi(page);
     await localTiles(page);
     await page.goto("/trips");
-    await page.getByRole("button", { name: "History navigation", exact: true }).click();
-    const items = page.getByRole("menuitem");
-    await expect(items).toHaveCount(3);
+    const items = page.getByRole("navigation", { name: "Primary navigation", exact: true }).getByRole("link");
+    await expect(items).toHaveCount(2);
     for (let index = 0; index < await items.count(); index += 1) {
       const box = await items.nth(index).boundingBox();
       expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);

@@ -5,7 +5,7 @@ export default defineConfig({
   testMatch: "history.spec.ts",
   workers: 1,
   webServer: {
-    command: "pnpm vite --host 127.0.0.1 --port 49233",
+    command: "pnpm exec vite --host 127.0.0.1 --port 49233",
     url: "http://127.0.0.1:49233",
     reuseExistingServer: false,
   },

@@ -12,7 +12,7 @@ import {
   Container,
   Group,
   MantineProvider,
-  Menu,
+  NavLink,
   Paper,
   PasswordInput,
   Select,
@@ -1449,29 +1449,85 @@ function Protected({ children }: { children: React.ReactNode }) {
   </>;
 }
 
+function VehicleControl() {
+  const { t } = useTranslation();
+  const { vehicle, vehicles, setVehicleId } = useHistoryContext();
+  if (vehicles.length === 0) return null;
+  const label = vehicle?.name || vehicle?.model || `${t("vehicle")} ${vehicle?.id ?? ""}`;
+  if (vehicles.length === 1) {
+    return <Text className="shell-vehicle-name" size="sm" fw={600}>{label}</Text>;
+  }
+  return (
+    <Select
+      aria-label={t("selectVehicle")}
+      className="shell-vehicle-select"
+      data={vehicles.map((available) => ({
+        value: String(available.id),
+        label: available.name || available.model || `${t("vehicle")} ${available.id}`,
+      }))}
+      onChange={(id) => id && setVehicleId(Number(id))}
+      value={vehicle ? String(vehicle.id) : null}
+    />
+  );
+}
+
+function ShellNavigation({ variant }: { variant: "sidebar" | "bottom" }) {
+  const { t } = useTranslation();
+  const location = useLocation();
+  const { historyPath } = useHistoryContext();
+  const items = [
+    { key: "trips", to: "/trips" },
+    { key: "charges", to: "/charges" },
+  ] as const;
+  return (
+    <nav aria-label={t("primaryNavigation")} className={`shell-navigation shell-navigation-${variant}`}>
+      {items.map(({ key, to }) => {
+        const active = location.pathname === to || location.pathname.startsWith(`${to}/`);
+        const destination = historyPath(to);
+        return variant === "sidebar" ? (
+          <NavLink
+            key={key}
+            component={Link}
+            to={destination}
+            label={t(key)}
+            active={active}
+            aria-current={active ? "page" : undefined}
+          />
+        ) : (
+          <Button
+            key={key}
+            component={Link}
+            to={destination}
+            variant={active ? "light" : "subtle"}
+            aria-current={active ? "page" : undefined}
+          >
+            {t(key)}
+          </Button>
+        );
+      })}
+    </nav>
+  );
+}
+
 function Shell() {
   const location = useLocation();
   const showHeader = !location.pathname.startsWith("/login");
   const { t } = useTranslation();
-  const { historyPath } = useHistoryContext();
+  const showHistoryContext = /^\/(vehicles|trips|charges)(?:\/|$)/.test(location.pathname);
   return (
-    <AppShell header={showHeader ? { height: 60 } : undefined}>
+    <AppShell
+      header={showHeader ? { height: 64 } : undefined}
+      navbar={showHeader ? { width: 252, breakpoint: "sm" } : undefined}
+      footer={showHeader ? { height: 64 } : undefined}
+      padding={0}
+    >
       {showHeader && (
         <AppShell.Header>
-          <Container size="sm" h="100%" className="shell-header">
+          <Container size="xl" h="100%" className="shell-header">
             <Group justify="space-between" h="100%" wrap="nowrap" gap={4}>
               <Text fw={700}>{t("appName")}</Text>
               <Group gap={2} wrap="nowrap" className="shell-header-actions">
-                <Menu shadow="md" width={160} position="bottom-end">
-                  <Menu.Target>
-                    <Button variant="subtle" aria-label={t("navigation")}>{t("menu")}</Button>
-                  </Menu.Target>
-                  <Menu.Dropdown>
-                    <Menu.Item component={Link} to={historyPath("/vehicles")}>{t("vehicles")}</Menu.Item>
-                    <Menu.Item component={Link} to={historyPath("/trips")}>{t("trips")}</Menu.Item>
-                    <Menu.Item component={Link} to={historyPath("/charges")}>{t("charges")}</Menu.Item>
-                  </Menu.Dropdown>
-                </Menu>
+                {showHistoryContext && <VehicleControl />}
                 <Button component={Link} to="/settings" variant="subtle">
                   {t("settings")}
                 </Button>
@@ -1481,8 +1537,24 @@ function Shell() {
           </Container>
         </AppShell.Header>
       )}
+      {showHeader && (
+        <AppShell.Navbar p="sm" className="shell-sidebar">
+          <Stack gap="md" h="100%">
+            {showHistoryContext && <VehicleControl />}
+            <ShellNavigation variant="sidebar" />
+            <Button component={Link} to="/settings" variant="subtle" className="shell-sidebar-settings">
+              {t("settings")}
+            </Button>
+          </Stack>
+        </AppShell.Navbar>
+      )}
+      {showHeader && (
+        <AppShell.Footer className="shell-bottom-bar">
+          <ShellNavigation variant="bottom" />
+        </AppShell.Footer>
+      )}
       <AppShell.Main>
-        <Container size="sm" pt="md"><PwaStatus showInstall={showHeader} /></Container>
+        <Container size="xl" pt="md"><PwaStatus showInstall={showHeader} /></Container>
         <Routes>
           <Route path="/login" element={<Credentials />} />
           <Route
