@@ -116,12 +116,13 @@ type MockOptions = {
   settingsRequests?: { count: number };
   vehicleRequests?: { count: number };
   historyWindowRequests?: { requests: URL[] };
+  preferenceBodies?: { bodies: Record<string, unknown>[] };
   deferredHistoryWindow?: { preset: string; vehicleId?: number; started: { count: number }; release: Promise<void> };
 };
 async function mockHistoryApi(page: Page, options: MockOptions = {}) {
   const lists: URL[] = [];
   const settings = {
-    preferences: { language: options.language ?? "en", timezone: "Europe/Amsterdam", tile_url: "https://tiles.example/{z}/{x}/{y}.png", saved: true },
+    preferences: { language: options.language ?? "en", timezone: "Europe/Amsterdam", tile_url: "https://tiles.example/{z}/{x}/{y}.png", range_basis: "rated", display_currency: null, saved: true },
     postgresql: { password_set: false, version: 1, status: "success", test_available: true, test_result: null, host: "postgres", username: "reader", enabled: true, skipped: false, port: 5432, database: "teslamate_synthetic", sslmode: "disable" },
     mqtt: { password_set: false, version: 0, status: "disabled", test_available: false, test_result: null, host: "", username: "", enabled: false, skipped: true, port: 1883, tls: false, verify_tls: true, topic_prefix: "" },
     smtp: { password_set: false, version: 0, status: "disabled", test_available: false, test_result: null, host: "", username: "", enabled: false, skipped: true, port: 587, tls_mode: "starttls", verify_tls: true, sender: "" },
@@ -133,6 +134,12 @@ async function mockHistoryApi(page: Page, options: MockOptions = {}) {
     if (path.endsWith("/setup/status")) return route.fulfill({ json: { administrator_exists: true } });
     if (path.endsWith("/auth/me")) return route.fulfill({ json: { username: credentials.username } });
     if (path.endsWith("/auth/csrf")) return route.fulfill({ json: { csrf_token: "mock-csrf" } });
+    if (path.endsWith("/settings/preferences")) {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      options.preferenceBodies?.bodies.push(body);
+      Object.assign(settings.preferences, body, { saved: true });
+      return route.fulfill({ json: settings });
+    }
     if (path.endsWith("/settings")) {
       if (options.settingsRequests) options.settingsRequests.count += 1;
       const settingsFailure = options.settingsFailure
@@ -520,5 +527,64 @@ test.describe("T10 visual foundations", () => {
     await items.first().focus();
     const outline = await items.first().evaluate((element) => getComputedStyle(element).outlineStyle);
     expect(outline).toBe("solid");
+  });
+});
+
+test.describe("T12 display preferences", () => {
+  test("saves and restores display controls without changing language or timezone", async ({ page }) => {
+    const preferenceBodies = { bodies: [] as Record<string, unknown>[] };
+    await mockHistoryApi(page, { preferenceBodies });
+    await page.goto("/settings");
+    const preferences = page.getByRole("region", { name: "Preferences", exact: true });
+    await expect(preferences.getByLabel(/^Display timezone(?:\s*\*)?$/)).toHaveValue("Europe/Amsterdam");
+
+    await preferences.getByLabel("Range basis", { exact: true }).click();
+    await page.getByRole("option", { name: "Ideal range", exact: true }).click();
+    await preferences.getByLabel("Display currency", { exact: true }).click();
+    await page.getByRole("option", { name: "EUR", exact: true }).click();
+    await preferences.getByLabel("Appearance", { exact: true }).click();
+    await page.getByRole("option", { name: "Dark", exact: true }).click();
+    await preferences.getByRole("button", { name: "Save", exact: true }).click();
+    await expect.poll(() => preferenceBodies.bodies.length).toBe(1);
+    expect(preferenceBodies.bodies[0]).toMatchObject({
+      language: "en",
+      timezone: "Europe/Amsterdam",
+      range_basis: "ideal",
+      display_currency: "EUR",
+    });
+    await expect(page.locator("html")).toHaveAttribute("data-mantine-color-scheme", "dark");
+
+    await page.reload();
+    const reloaded = page.getByRole("region", { name: "Preferences", exact: true });
+    await expect(reloaded.getByLabel("Language", { exact: true })).toHaveValue("English");
+    await expect(reloaded.getByLabel("Range basis", { exact: true })).toHaveValue("Ideal range");
+    await expect(reloaded.getByLabel("Display currency", { exact: true })).toHaveValue("EUR");
+    await expect(reloaded.getByLabel(/^Display timezone(?:\s*\*)?$/)).toHaveValue("Europe/Amsterdam");
+    await expect(page.locator("html")).toHaveAttribute("data-mantine-color-scheme", "dark");
+
+    await reloaded.getByLabel("Appearance", { exact: true }).click();
+    await page.getByRole("option", { name: "Light", exact: true }).click();
+    await expect(page.locator("html")).toHaveAttribute("data-mantine-color-scheme", "light");
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("data-mantine-color-scheme", "light");
+    await expect(page.getByRole("region", { name: "Preferences", exact: true }).getByLabel("Appearance", { exact: true })).toHaveValue("Light");
+
+    const lightReloaded = page.getByRole("region", { name: "Preferences", exact: true });
+    await lightReloaded.getByRole("button", { name: "Clear display currency", exact: true }).click();
+    await lightReloaded.getByLabel("Appearance", { exact: true }).click();
+    await page.getByRole("option", { name: "System default", exact: true }).click();
+    await expect(lightReloaded.getByLabel("Appearance", { exact: true })).toHaveValue("System default");
+    await lightReloaded.getByRole("button", { name: "Save", exact: true }).click();
+    await expect.poll(() => preferenceBodies.bodies.length).toBe(2);
+    expect(preferenceBodies.bodies[1]).toMatchObject({
+      language: "en",
+      timezone: "Europe/Amsterdam",
+      range_basis: "ideal",
+      display_currency: null,
+    });
+    await expect(lightReloaded.getByText("Choose a currency only when existing records use that same currency. MateScope does not convert amounts.", { exact: true })).toBeVisible();
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("data-mantine-color-scheme", "light");
+    await expect(page.getByRole("region", { name: "Preferences", exact: true }).getByLabel("Appearance", { exact: true })).toHaveValue("System default");
   });
 });

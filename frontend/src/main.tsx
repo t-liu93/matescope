@@ -20,6 +20,7 @@ import {
   Text,
   TextInput,
   Title,
+  useMantineColorScheme,
 } from "@mantine/core";
 import { DatesProvider } from "@mantine/dates";
 import {
@@ -65,6 +66,8 @@ type PostgreSQLInput = components["schemas"]["PostgreSQLInput"];
 type MqttInput = components["schemas"]["MQTTInput"];
 type SmtpInput = components["schemas"]["SMTPInput"];
 type PostgreSQLResponse = components["schemas"]["PostgreSQLResponse"];
+type DisplayCurrency = components["schemas"]["Preferences"]["display_currency"];
+const displayCurrencies = ["AUD", "CAD", "CHF", "CNY", "DKK", "EUR", "GBP", "JPY", "NOK", "NZD", "PLN", "SEK", "USD"] as const;
 type ConnectionTestResult =
   | components["schemas"]["PostgreSQLTestResult"]
   | components["schemas"]["MQTTTestResult"]
@@ -406,6 +409,7 @@ function Preferences({
   afterSave?: () => void;
 }) {
   const { t } = useTranslation();
+  const { colorScheme, setColorScheme } = useMantineColorScheme();
   const pref = settings.preferences!;
   const [language, setLanguage] = useState(
     pref.saved ? pref.language : i18n.language.startsWith("zh") ? "zh" : "en",
@@ -414,9 +418,21 @@ function Preferences({
     pref.saved ? pref.timezone : browserTimezone,
   );
   const [tileUrl, setTileUrl] = useState(pref.tile_url);
+  const [rangeBasis, setRangeBasis] = useState<"rated" | "ideal">(
+    pref.range_basis ?? "rated",
+  );
+  const [displayCurrency, setDisplayCurrency] = useState<Exclude<DisplayCurrency, undefined>>(
+    pref.display_currency ?? null,
+  );
   const save = useMutation({
     mutationFn: () =>
-      settingsApi.preferences({ language, timezone, tile_url: tileUrl }),
+      settingsApi.preferences({
+        language,
+        timezone,
+        tile_url: tileUrl,
+        range_basis: rangeBasis,
+        display_currency: displayCurrency,
+      }),
     onSuccess: (data) => {
       void i18n.changeLanguage(language);
       queryClient.setQueryData(["settings"], data);
@@ -444,6 +460,47 @@ function Preferences({
         label={t("tileUrl")}
         value={tileUrl}
         onChange={(e) => setTileUrl(e.currentTarget.value)}
+      />
+      <Select
+        label={t("rangeBasis")}
+        value={rangeBasis}
+        onChange={(v) => setRangeBasis((v ?? "rated") as "rated" | "ideal")}
+        data={[
+          { value: "rated", label: t("rangeRated") },
+          { value: "ideal", label: t("rangeIdeal") },
+        ]}
+      />
+      <Group align="end" gap="xs">
+        <Select
+          label={t("displayCurrency")}
+          value={displayCurrency}
+          onChange={(value) =>
+            setDisplayCurrency(
+              value && (displayCurrencies as readonly string[]).includes(value)
+                ? (value as Exclude<DisplayCurrency, undefined>)
+                : null,
+            )
+          }
+          data={[
+            ...displayCurrencies.map((currency) => ({ value: currency, label: currency })),
+          ]}
+          placeholder={t("currencyUnset")}
+          clearable
+        />
+        <Button variant="subtle" onClick={() => setDisplayCurrency(null)}>
+          {t("clearCurrency")}
+        </Button>
+      </Group>
+      <Text size="sm" c="dimmed">{t("currencyHelp")}</Text>
+      <Select
+        label={t("appearance")}
+        value={colorScheme}
+        onChange={(v) => setColorScheme((v ?? "auto") as "light" | "dark" | "auto")}
+        data={[
+          { value: "auto", label: t("themeSystem") },
+          { value: "light", label: t("themeLight") },
+          { value: "dark", label: t("themeDark") },
+        ]}
       />
       <Button onClick={() => save.mutate()} loading={save.isPending}>
         {t("save")}
