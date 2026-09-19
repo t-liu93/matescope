@@ -290,6 +290,91 @@ def test_trip_places_and_soc_require_only_checked_optional_columns(
             admin.execute("DELETE FROM public.addresses WHERE id IN (-998,-999)")
 
 
+def test_trip_estimated_energy_uses_saved_basis_and_excludes_invalid_inputs(
+    client: TestClient, admin: psycopg.Connection[Any]
+) -> None:
+    """T15 exposes only valid estimated values and never falls back between bases."""
+    legacy = client.get("/api/v1/trips/1")
+    assert legacy.status_code == 200
+    assert legacy.json()["estimated_energy_kwh"] is None
+    assert legacy.json()["estimated_average_consumption_wh_per_km"] is None
+
+    with optional_grants(admin):
+        rated = client.get("/api/v1/trips/1")
+        assert rated.status_code == 200, rated.text
+        assert {
+            key: rated.json()[key]
+            for key in ("estimated_energy_kwh", "estimated_average_consumption_wh_per_km")
+        } == {
+            "estimated_energy_kwh": pytest.approx(2.16),
+            "estimated_average_consumption_wh_per_km": pytest.approx(172.8),
+        }
+        listed = client.get("/api/v1/trips", params={"vehicle_id": 1})
+        row = next(item for item in listed.json()["items"] if item["id"] == 1)
+        assert row["estimated_energy_kwh"] == pytest.approx(2.16)
+
+        save(client, "preferences", {"range_basis": "ideal"})
+        ideal = client.get("/api/v1/trips/1")
+        assert ideal.status_code == 200, ideal.text
+        assert {
+            key: ideal.json()[key]
+            for key in ("estimated_energy_kwh", "estimated_average_consumption_wh_per_km")
+        } == {
+            "estimated_energy_kwh": pytest.approx(2.52),
+            "estimated_average_consumption_wh_per_km": pytest.approx(201.6),
+        }
+
+        save(client, "preferences", {"range_basis": "rated"})
+        original_one = admin.execute(
+            "SELECT distance,start_rated_range_km,end_rated_range_km FROM public.drives WHERE id=1"
+        ).fetchone()
+        original_three = admin.execute(
+            "SELECT distance,start_rated_range_km,end_rated_range_km FROM public.drives WHERE id=3"
+        ).fetchone()
+        try:
+            admin.execute("UPDATE public.drives SET distance=0 WHERE id=1")
+            zero_distance = client.get("/api/v1/trips/1").json()
+            assert zero_distance["estimated_energy_kwh"] is None
+            assert zero_distance["estimated_average_consumption_wh_per_km"] is None
+
+            admin.execute(
+                "UPDATE public.drives SET distance=10,start_rated_range_km=50,"
+                "end_rated_range_km=55 WHERE id=1"
+            )
+            negative_difference = client.get("/api/v1/trips/1").json()
+            assert negative_difference["estimated_energy_kwh"] is None
+            assert negative_difference["estimated_average_consumption_wh_per_km"] is None
+
+            admin.execute("UPDATE public.drives SET end_rated_range_km=50 WHERE id=1")
+            zero_difference = client.get("/api/v1/trips/1").json()
+            assert zero_difference["estimated_energy_kwh"] == 0
+            assert zero_difference["estimated_average_consumption_wh_per_km"] == 0
+
+            admin.execute("UPDATE public.drives SET start_rated_range_km='NaN'::numeric WHERE id=1")
+            nonfinite_range = client.get("/api/v1/trips/1").json()
+            assert nonfinite_range["estimated_energy_kwh"] is None
+            assert nonfinite_range["estimated_average_consumption_wh_per_km"] is None
+
+            admin.execute(
+                "UPDATE public.drives SET distance=10,start_rated_range_km=100,"
+                "end_rated_range_km=90 WHERE id=3"
+            )
+            missing_efficiency = client.get("/api/v1/trips/3").json()
+            assert missing_efficiency["estimated_energy_kwh"] is None
+            assert missing_efficiency["estimated_average_consumption_wh_per_km"] is None
+        finally:
+            admin.execute(
+                "UPDATE public.drives SET distance=%s,start_rated_range_km=%s,"
+                "end_rated_range_km=%s WHERE id=1",
+                original_one,
+            )
+            admin.execute(
+                "UPDATE public.drives SET distance=%s,start_rated_range_km=%s,"
+                "end_rated_range_km=%s WHERE id=3",
+                original_three,
+            )
+
+
 def test_charge_details_distinguish_recorded_values_permissions_and_vehicles(
     client: TestClient, admin: psycopg.Connection[Any]
 ) -> None:

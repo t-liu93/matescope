@@ -1413,6 +1413,10 @@ export interface components {
             start_battery_level: number | null;
             /** End Battery Level */
             end_battery_level: number | null;
+            /** Estimated Energy Kwh */
+            estimated_energy_kwh: number | null;
+            /** Estimated Average Consumption Wh Per Km */
+            estimated_average_consumption_wh_per_km: number | null;
         };
         /** TripPage */
         TripPage: {

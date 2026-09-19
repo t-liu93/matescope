@@ -51,6 +51,8 @@ class Trip(Summary):
     end_place: str | None
     start_battery_level: int | None
     end_battery_level: int | None
+    estimated_energy_kwh: float | None
+    estimated_average_consumption_wh_per_km: float | None
 
 
 class Charge(Summary):
@@ -366,6 +368,7 @@ CHARGE_FIELDS = (
 
 def trip_projection(
     capabilities: dict[str, CapabilityReason | None],
+    range_basis: Literal["rated", "ideal"],
 ) -> tuple[str, str]:
     """Build a projection only after optional column grants have been checked."""
     fields = [TRIP_FIELDS]
@@ -378,6 +381,7 @@ def trip_projection(
         # position from another drive unavailable instead of exposing its SOC.
         joins.extend(
             [
+                "LEFT JOIN public.cars AS trip_car ON trip_car.id=d.car_id",
                 "LEFT JOIN public.positions AS start_position "
                 "ON start_position.id=d.start_position_id AND start_position.drive_id=d.id",
                 "LEFT JOIN public.positions AS end_position "
@@ -388,6 +392,8 @@ def trip_projection(
             [
                 "start_position.battery_level AS start_battery_level",
                 "end_position.battery_level AS end_battery_level",
+                trip_energy_projection(range_basis),
+                trip_consumption_projection(range_basis),
             ]
         )
     else:
@@ -395,6 +401,8 @@ def trip_projection(
             [
                 "NULL::smallint AS start_battery_level",
                 "NULL::smallint AS end_battery_level",
+                "NULL::numeric AS estimated_energy_kwh",
+                "NULL::numeric AS estimated_average_consumption_wh_per_km",
             ]
         )
 
@@ -434,6 +442,49 @@ def trip_projection(
     else:
         fields.extend(["NULL::text AS start_place", "NULL::text AS end_place"])
     return ", ".join(fields), " ".join(joins)
+
+
+def trip_energy_conditions(range_basis: Literal["rated", "ideal"]) -> str:
+    """Return the shared eligibility rule for each estimated trip metric.
+
+    PostgreSQL numeric values can contain NaN or infinities, so textual checks
+    are necessary in addition to null and positivity checks.  This prevents an
+    invalid source value from becoming a JSON non-finite number.
+    """
+    start_range = f"d.start_{range_basis}_range_km"
+    end_range = f"d.end_{range_basis}_range_km"
+    finite = "::text NOT IN ('NaN', 'Infinity', '-Infinity')"
+    return (
+        "d.end_date IS NOT NULL "
+        f"AND d.distance IS NOT NULL AND d.distance{finite} AND d.distance > 0 "
+        "AND trip_car.efficiency IS NOT NULL AND trip_car.efficiency > 0 "
+        f"AND trip_car.efficiency{finite} "
+        f"AND {start_range} IS NOT NULL AND {start_range}{finite} "
+        f"AND {end_range} IS NOT NULL AND {end_range}{finite} "
+        f"AND {start_range} - {end_range} >= 0"
+    )
+
+
+def trip_energy_projection(range_basis: Literal["rated", "ideal"]) -> str:
+    start_range = f"d.start_{range_basis}_range_km"
+    end_range = f"d.end_{range_basis}_range_km"
+    return (
+        "CASE WHEN "
+        f"{trip_energy_conditions(range_basis)} "
+        f"THEN ({start_range} - {end_range}) * trip_car.efficiency "
+        "ELSE NULL::numeric END AS estimated_energy_kwh"
+    )
+
+
+def trip_consumption_projection(range_basis: Literal["rated", "ideal"]) -> str:
+    start_range = f"d.start_{range_basis}_range_km"
+    end_range = f"d.end_{range_basis}_range_km"
+    return (
+        "CASE WHEN "
+        f"{trip_energy_conditions(range_basis)} "
+        f"THEN (({start_range} - {end_range}) * trip_car.efficiency / d.distance) * 1000 "
+        "ELSE NULL::numeric END AS estimated_average_consumption_wh_per_km"
+    )
 
 
 def charge_projection(
@@ -516,7 +567,9 @@ def page(
     with connection(request) as database:
         joins = ""
         if kind == "trips":
-            fields, joins = trip_projection(capability_status(database))
+            with Session(storage(request).engine) as session:
+                range_basis = read_settings(session).preferences.range_basis
+            fields, joins = trip_projection(capability_status(database), range_basis)
         else:
             fields, joins = charge_projection(capability_status(database))
         rows = database.execute(
@@ -560,7 +613,9 @@ def detail(request: Request, identifier: int, kind: Literal["trips", "charges"])
     with connection(request) as database:
         joins = ""
         if kind == "trips":
-            fields, joins = trip_projection(capability_status(database))
+            with Session(storage(request).engine) as session:
+                range_basis = read_settings(session).preferences.range_basis
+            fields, joins = trip_projection(capability_status(database), range_basis)
         else:
             fields, joins = charge_projection(capability_status(database))
         row = database.execute(

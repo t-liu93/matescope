@@ -3038,6 +3038,28 @@
               }
             ],
             "title": "End Battery Level"
+          },
+          "estimated_energy_kwh": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Energy Kwh"
+          },
+          "estimated_average_consumption_wh_per_km": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Average Consumption Wh Per Km"
           }
         },
         "type": "object",
@@ -3052,7 +3074,9 @@
           "start_place",
           "end_place",
           "start_battery_level",
-          "end_battery_level"
+          "end_battery_level",
+          "estimated_energy_kwh",
+          "estimated_average_consumption_wh_per_km"
         ],
         "title": "Trip"
       },
