@@ -428,6 +428,35 @@ export function DetailValues({ item, kind, timezone, rangeBasis }: { item: Trip 
   </Stack>;
 }
 
+export function TripMoreData({ series, timezone }: { series: TripSeries["series"]; timezone: string }) {
+  const { t } = useTranslation();
+  const insideTemperature = series.find((item) => item.name === "inside_temperature");
+  const outsideTemperature = series.find((item) => item.name === "outside_temperature");
+  const elevation = series.find((item) => item.name === "elevation");
+  const temperatureTitle = t("tripTemperature");
+
+  return <details className="trip-more-data">
+    <summary>{t("tripMoreData")}</summary>
+    <div className="trip-more-data-grid">
+      <Card withBorder radius="sm"><Stack gap="sm">
+        <Title order={3}>{temperatureTitle}</Title>
+        {!insideTemperature && !outsideTemperature && <Alert color="yellow" role="status">{t("tripTemperatureUnavailable")}</Alert>}
+        {insideTemperature && outsideTemperature
+          ? <DualTimeSeriesChart first={insideTemperature} second={outsideTemperature} timezone={timezone} title={temperatureTitle} firstTitle={t("insideTemperature")} secondTitle={t("outsideTemperature")} />
+          : insideTemperature
+            ? <><TimeSeriesChart series={insideTemperature} timezone={timezone} title={t("insideTemperature")} /><Alert color="yellow" role="status">{t("outsideTemperatureUnavailable")}</Alert></>
+            : outsideTemperature
+              ? <><TimeSeriesChart series={outsideTemperature} timezone={timezone} title={t("outsideTemperature")} /><Alert color="yellow" role="status">{t("insideTemperatureUnavailable")}</Alert></>
+              : null}
+      </Stack></Card>
+      <Card withBorder radius="sm"><Stack gap="sm">
+        <Title order={3}>{t("tripElevation")}</Title>
+        {elevation ? <TimeSeriesChart series={elevation} timezone={timezone} title={t("tripElevation")} /> : <Alert color="yellow" role="status">{t("tripElevationUnavailable")}</Alert>}
+      </Stack></Card>
+    </div>
+  </details>;
+}
+
 function HistoryDetail({ kind }: { kind: "trips" | "charges" }) {
   const { t } = useTranslation();
   const params = useParams();
@@ -507,6 +536,7 @@ function HistoryDetail({ kind }: { kind: "trips" | "charges" }) {
               ? <Alert color="yellow">{t("tripSocUnavailable")}</Alert>
               : <TimeSeriesChart series={battery} timezone={timezone} title={t("tripSoc")} />}
           </Stack></Card>
+          <TripMoreData series={tripSeries.data.series} timezone={timezone} />
         </div>;
       })()}
     </Stack></Card>}

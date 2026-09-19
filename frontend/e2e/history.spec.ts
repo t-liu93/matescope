@@ -113,6 +113,7 @@ type MockOptions = {
   settingsFailuresRemaining?: { count: number };
   trajectoryFailure?: boolean;
   tripSeriesFailure?: boolean;
+  tripSeriesMoreData?: boolean;
   language?: "en" | "zh";
   settingsRequests?: { count: number };
   vehicleRequests?: { count: number };
@@ -217,6 +218,11 @@ async function mockHistoryApi(page: Page, options: MockOptions = {}) {
           { name: "speed", unit: "km/h", start: "2026-03-29T00:30:00Z", end: "2026-03-29T01:40:00Z", sample_count: 4, bucket_count: 4, aggregation: "mean_min_max", capability: { available: true, reason: null }, points: [{ time: "2026-03-29T00:30:00Z", mean: 38, min: 35, max: 42, value: 38, discontinuity: false }, { time: "2026-03-29T00:40:00Z", mean: 64, min: 60, max: 67, value: 64, discontinuity: false }, { time: "2026-03-29T01:30:00Z", mean: 0, min: 0, max: 0, value: 0, discontinuity: true }, { time: "2026-03-29T01:40:00Z", mean: 20, min: 18, max: 22, value: 20, discontinuity: false }] },
           { name: "power", unit: "kW", start: "2026-03-29T00:30:00Z", end: "2026-03-29T01:40:00Z", sample_count: 4, bucket_count: 4, aggregation: "mean_min_max", capability: { available: true, reason: null }, points: [{ time: "2026-03-29T00:30:00Z", mean: -8.4, min: -9, max: -8, value: -8.4, discontinuity: false }, { time: "2026-03-29T00:40:00Z", mean: -16.2, min: -17, max: -15, value: -16.2, discontinuity: false }, { time: "2026-03-29T01:30:00Z", mean: null, min: null, max: null, value: null, discontinuity: true }, { time: "2026-03-29T01:40:00Z", mean: -10, min: -12, max: -8, value: -10, discontinuity: false }] },
           { name: "battery", unit: "%", start: "2026-03-29T00:30:00Z", end: "2026-03-29T01:40:00Z", sample_count: 4, bucket_count: 4, aggregation: "last", capability: { available: true, reason: null }, points: [{ time: "2026-03-29T00:30:00Z", value: 82, discontinuity: false }, { time: "2026-03-29T00:40:00Z", value: 78, discontinuity: false }, { time: "2026-03-29T01:30:00Z", value: null, discontinuity: true }, { time: "2026-03-29T01:40:00Z", value: 68, discontinuity: false }] },
+          ...(options.tripSeriesMoreData ? [
+            { name: "inside_temperature", unit: "°C", start: "2026-03-29T00:30:00Z", end: "2026-03-29T01:40:00Z", sample_count: 4, bucket_count: 4, aggregation: "mean_min_max", capability: { available: true, reason: null }, points: [{ time: "2026-03-29T00:30:00Z", mean: 21, min: 20, max: 22, value: 21, discontinuity: false }, { time: "2026-03-29T00:40:00Z", mean: 22, min: 21, max: 23, value: 22, discontinuity: false }, { time: "2026-03-29T01:30:00Z", mean: null, min: null, max: null, value: null, discontinuity: true }, { time: "2026-03-29T01:40:00Z", mean: 22, min: 21, max: 23, value: 22, discontinuity: false }] },
+            { name: "outside_temperature", unit: "°C", start: "2026-03-29T00:30:00Z", end: "2026-03-29T01:40:00Z", sample_count: 4, bucket_count: 4, aggregation: "mean_min_max", capability: { available: true, reason: null }, points: [{ time: "2026-03-29T00:30:00Z", mean: 8, min: 7, max: 9, value: 8, discontinuity: false }, { time: "2026-03-29T00:40:00Z", mean: 9, min: 8, max: 10, value: 9, discontinuity: false }, { time: "2026-03-29T01:30:00Z", mean: null, min: null, max: null, value: null, discontinuity: true }, { time: "2026-03-29T01:40:00Z", mean: 9, min: 8, max: 10, value: 9, discontinuity: false }] },
+            { name: "elevation", unit: "m", start: "2026-03-29T00:30:00Z", end: "2026-03-29T01:40:00Z", sample_count: 4, bucket_count: 4, aggregation: "mean_min_max", capability: { available: true, reason: null }, points: [{ time: "2026-03-29T00:30:00Z", mean: 12, min: 11, max: 13, value: 12, discontinuity: false }, { time: "2026-03-29T00:40:00Z", mean: 14, min: 13, max: 15, value: 14, discontinuity: false }, { time: "2026-03-29T01:30:00Z", mean: null, min: null, max: null, value: null, discontinuity: true }, { time: "2026-03-29T01:40:00Z", mean: 16, min: 15, max: 17, value: 16, discontinuity: false }] },
+          ] : []),
         ],
       } });
     }
@@ -564,7 +570,7 @@ test.describe("T09 calendar history filters", () => {
   });
 });
 
-test.describe("T25 trip speed and power", () => {
+test.describe("T25/T27 trip charts", () => {
   test("keeps dual-unit data accessible on desktop and mobile", async ({ page }) => {
     await mockHistoryApi(page);
     await localTiles(page);
@@ -599,6 +605,24 @@ test.describe("T25 trip speed and power", () => {
     const batteryLabelText = await batteryChart.locator(".time-series-plot svg text").allTextContents();
     expect(batteryLabelText.some((label) => label.includes("2026"))).toBe(true);
     expect(batteryLabelText.join(" ")).not.toContain("1970");
+  });
+
+  test("keeps temperature and elevation in collapsed More data and renders SVGs after expansion", async ({ page }) => {
+    await mockHistoryApi(page, { tripSeriesMoreData: true });
+    await localTiles(page);
+    await page.goto("/trips/1");
+    const details = page.locator("details.trip-more-data");
+    await expect(details).toBeVisible();
+    await expect(details).not.toHaveAttribute("open", "");
+    await details.locator("summary").first().click();
+    await expect(details).toHaveAttribute("open", "");
+    await expect(details.getByRole("heading", { name: "Inside and outside temperature", exact: true })).toBeVisible();
+    await expect(details.getByRole("heading", { name: "Elevation", exact: true })).toBeVisible();
+    await expect(details.getByText(/Values use °C/)).toBeVisible();
+    await expect(details.getByText(/Values use m/)).toBeVisible();
+    await expect(details.locator(".time-series-plot svg")).toHaveCount(4);
+    await expect(details.locator(".time-series-plot path.recharts-line-curve")).toHaveCount(3);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   });
 
   test("keeps the summary and route usable when the series request fails", async ({ page }) => {
