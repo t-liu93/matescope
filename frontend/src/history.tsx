@@ -34,6 +34,8 @@ type HistoryPage = components["schemas"]["TripPage"] | components["schemas"]["Ch
 type TripPeriodSummary = components["schemas"]["TripPeriodSummary"];
 type ChargePeriodSummary = components["schemas"]["ChargePeriodSummary"];
 type TripSeries = components["schemas"]["TripSeries"];
+type ChargeSeries = components["schemas"]["ChargeSeries"];
+type TimeSeries = components["schemas"]["TimeSeries"];
 
 const TrajectoryMap = lazy(() => import("./trajectory-map"));
 
@@ -78,6 +80,20 @@ function value(value: number | null | undefined, unit: string) {
 function whole(value: number | null | undefined) {
   if (value == null) return <span className="metric-value metric-value-empty">—</span>;
   return <span className="metric-value">{Math.round(value).toLocaleString()}</span>;
+}
+
+function unavailableSeries(name: TimeSeries["name"], unit: string): TimeSeries {
+  return {
+    name,
+    unit,
+    start: null,
+    end: null,
+    sample_count: 0,
+    bucket_count: 0,
+    aggregation: name === "battery" ? "last" : "mean_min_max",
+    capability: { available: false, reason: "insufficient_permissions" },
+    points: [],
+  };
 }
 
 function signedWhole(value: number | null | undefined) {
@@ -503,6 +519,11 @@ function HistoryDetail({ kind }: { kind: "trips" | "charges" }) {
     queryFn: ({ signal }) => historyApi.tripSeries(identifier, { signal }),
     enabled: online && kind === "trips" && detail.isSuccess && Boolean(settings.data?.preferences?.saved),
   });
+  const chargeSeries = useQuery<ChargeSeries>({
+    queryKey: ["charge-series", identifier],
+    queryFn: ({ signal }) => historyApi.chargeSeries(identifier, { signal }),
+    enabled: online && kind === "charges" && detail.isSuccess && Boolean(settings.data?.preferences?.saved),
+  });
   const [mapModuleFailed, setMapModuleFailed] = useState(false);
   const [tileFailed, setTileFailed] = useState(false);
   useEffect(() => {
@@ -561,6 +582,16 @@ function HistoryDetail({ kind }: { kind: "trips" | "charges" }) {
           </Stack></Card>
           <TripMoreData series={tripSeries.data.series} timezone={timezone} />
         </div>;
+      })()}
+    </Stack></Card>}
+    {kind === "charges" && <Card key={`series-${identifier}`} withBorder radius="md"><Stack gap="sm">
+      <Title order={2}>{t("chargePowerSoc")}</Title>
+      {chargeSeries.isPending && <Text>{t("loading")}</Text>}
+      {chargeSeries.error && <Alert color="yellow">{t("chargeSeriesUnavailable")}</Alert>}
+      {chargeSeries.data && (() => {
+        const power = chargeSeries.data.series.find((series) => series.name === "power") ?? unavailableSeries("power", "kW");
+        const battery = chargeSeries.data.series.find((series) => series.name === "battery") ?? unavailableSeries("battery", "%");
+        return <DualTimeSeriesChart first={power} second={battery} timezone={timezone} title={t("chargePowerSoc")} firstTitle={t("power")} secondTitle={t("soc")} />;
       })()}
     </Stack></Card>}
   </Stack></Container>;

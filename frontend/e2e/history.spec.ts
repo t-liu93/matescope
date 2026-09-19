@@ -114,6 +114,8 @@ type MockOptions = {
   trajectoryFailure?: boolean;
   tripSeriesFailure?: boolean;
   tripSeriesMoreData?: boolean;
+  chargeSeriesFailure?: boolean;
+  chargeSeriesResponse?: Record<string, unknown>;
   language?: "en" | "zh";
   settingsRequests?: { count: number };
   vehicleRequests?: { count: number };
@@ -214,6 +216,15 @@ async function mockHistoryApi(page: Page, options: MockOptions = {}) {
     if (/\/charges\/\d+$/.test(path)) {
       const id = path.split("/").at(-1)!;
       return route.fulfill({ json: options.chargeDetails?.[id] ?? { id: Number(id), vehicle_id: 1, start: "2026-09-12T20:00:00Z", end: "2026-09-12T20:45:00Z", duration_min: 45, energy_added_kwh: 22.5 } });
+    }
+    if (path.endsWith("/charges/1/series")) {
+      if (options.chargeSeriesFailure) return route.fulfill({ status: 503, json: { detail: "unavailable" } });
+      return route.fulfill({ json: options.chargeSeriesResponse ?? {
+      charge_id: 1, capability: { available: true, reason: null }, series: [
+        { name: "power", unit: "kW", start: "2026-09-12T20:00:00Z", end: "2026-09-12T20:45:00Z", sample_count: 4, bucket_count: 4, aggregation: "mean_min_max", capability: { available: true, reason: null }, points: [{ time: "2026-09-12T20:00:00Z", mean: 7.2, min: 6.8, max: 7.6, value: 7.2, discontinuity: false }, { time: "2026-09-12T20:15:00Z", mean: 8.3, min: 8, max: 8.7, value: 8.3, discontinuity: false }, { time: "2026-09-12T20:30:00Z", mean: null, min: null, max: null, value: null, discontinuity: true }, { time: "2026-09-12T20:45:00Z", mean: 6.7, min: 6.5, max: 6.9, value: 6.7, discontinuity: false }] },
+        { name: "battery", unit: "%", start: "2026-09-12T20:00:00Z", end: "2026-09-12T20:45:00Z", sample_count: 3, bucket_count: 3, aggregation: "last", capability: { available: true, reason: null }, points: [{ time: "2026-09-12T20:00:00Z", value: 20.1, discontinuity: false }, { time: "2026-09-12T20:15:00Z", value: 37.6, discontinuity: false }, { time: "2026-09-12T20:45:00Z", value: 60.7, discontinuity: false }] },
+      ],
+    } });
     }
     if (path.endsWith("/trips/1/series")) {
       if (options.tripSeriesFailure) return route.fulfill({ status: 503, json: { detail: "unavailable" } });
@@ -799,6 +810,64 @@ test.describe("T28 charge detail summary", () => {
     if (testInfo.project.name === "mobile") {
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     }
+  });
+});
+
+test.describe("T29 charge power and SOC chart", () => {
+  test("renders two non-empty data-line paths with mean/last values, units, gaps, and saved-zone dates", async ({ page }) => {
+    await mockHistoryApi(page, { displayCurrency: "EUR" });
+    await page.goto("/charges/1?vehicle=1&start=2026-09-01T00%3A00%3A00Z&end=2026-10-01T00%3A00%3A00Z");
+    const chart = page.getByRole("figure", { name: "Charging power and battery level" });
+    await expect(chart).toBeVisible();
+    await expect(chart.getByText(/Values use kW/)).toBeVisible();
+    await expect(chart.getByText(/Values use %/)).toBeVisible();
+    const lines = chart.locator("path.recharts-line-curve");
+    await expect(lines).toHaveCount(2);
+    expect(await lines.evaluateAll((paths) => paths.map((path) => path.getAttribute("d")))).toEqual([
+      expect.stringMatching(/\S/),
+      expect.stringMatching(/\S/),
+    ]);
+    await chart.getByText("Chart data table", { exact: true }).click();
+    await expect(chart.getByText(/Data gap/)).toBeVisible();
+    await expect(chart.getByText("7.2 kW", { exact: true })).toBeVisible();
+    await expect(chart.getByText("38 %", { exact: true })).toBeVisible();
+    const axisLabels = await chart.locator(".time-series-plot svg text").allTextContents();
+    expect(axisLabels.some((label) => label.includes("2026"))).toBe(true);
+    expect(axisLabels.join(" ")).not.toContain("1970");
+  });
+
+  test("keeps battery visible when power is absent or unavailable", async ({ page }) => {
+    await mockHistoryApi(page, { chargeSeriesResponse: {
+      charge_id: 1, capability: { available: true, reason: null }, series: [{
+        name: "battery", unit: "%", start: "2026-09-12T20:00:00Z", end: "2026-09-12T20:45:00Z", sample_count: 2, bucket_count: 2, aggregation: "last", capability: { available: true, reason: null }, points: [{ time: "2026-09-12T20:00:00Z", value: 20, discontinuity: false }, { time: "2026-09-12T20:45:00Z", value: 60, discontinuity: false }],
+      }],
+    } });
+    await page.goto("/charges/1?vehicle=1");
+    const chart = page.getByRole("figure", { name: "Charging power and battery level" });
+    await expect(chart.getByText("Power: This chart is unavailable.")).toBeVisible();
+    const lines = chart.locator("path.recharts-line-curve");
+    await expect(lines).toHaveCount(1);
+    await expect(lines.first()).toHaveAttribute("d", /\S/);
+
+    await page.unroute("**/api/v1/**");
+    await mockHistoryApi(page, { chargeSeriesResponse: {
+      charge_id: 1, capability: { available: true, reason: null }, series: [
+        { name: "power", unit: "kW", start: "2026-09-12T20:00:00Z", end: "2026-09-12T20:45:00Z", sample_count: 2, bucket_count: 2, aggregation: "mean_min_max", capability: { available: false, reason: "insufficient_permissions" }, points: [] },
+        { name: "battery", unit: "%", start: "2026-09-12T20:00:00Z", end: "2026-09-12T20:45:00Z", sample_count: 2, bucket_count: 2, aggregation: "last", capability: { available: true, reason: null }, points: [{ time: "2026-09-12T20:00:00Z", value: 20, discontinuity: false }, { time: "2026-09-12T20:45:00Z", value: 60, discontinuity: false }] },
+      ],
+    } });
+    await page.reload();
+    await expect(chart.getByText("Power: This chart is unavailable.")).toBeVisible();
+    await expect(chart.locator("path.recharts-line-curve")).toHaveCount(1);
+    await expect(chart.locator("path.recharts-line-curve").first()).toHaveAttribute("d", /\S/);
+  });
+
+  test("shows only a local chart failure while retaining the charge summary", async ({ page }) => {
+    await mockHistoryApi(page, { chargeSeriesFailure: true });
+    await page.goto("/charges/1?vehicle=1");
+    await expect(page.getByText("Charging power and battery level data could not be loaded. The charge summary remains available.")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Summary", exact: true })).toBeVisible();
+    await expect(page.getByText("22.5 kWh", { exact: true })).toBeVisible();
   });
 });
 

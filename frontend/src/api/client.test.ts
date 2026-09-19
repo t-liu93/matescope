@@ -113,7 +113,7 @@ describe("typed API client", () => {
     });
   });
 
-  it("passes cancellation through the trip-series request", async () => {
+  it("passes cancellation through the charge-series request", async () => {
     vi.resetModules();
     let requestSignal: AbortSignal | null = null;
     let requestUrl = "";
@@ -127,9 +127,9 @@ describe("typed API client", () => {
     const { historyApi } = await import("./client");
     const controller = new AbortController();
 
-    await historyApi.tripSeries(7, { signal: controller.signal });
+    await historyApi.chargeSeries(7, { signal: controller.signal });
     expect(requestSignal).not.toBeNull();
-    expect(requestUrl).toContain("/api/v1/trips/7/series");
+    expect(requestUrl).toContain("/api/v1/charges/7/series");
     controller.abort();
     expect(receivedAbort).toBe(true);
   });
