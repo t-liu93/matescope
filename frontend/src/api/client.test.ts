@@ -113,11 +113,13 @@ describe("typed API client", () => {
     });
   });
 
-  it("passes cancellation through history requests", async () => {
+  it("passes cancellation through the trip-series request", async () => {
     vi.resetModules();
     let requestSignal: AbortSignal | null = null;
+    let requestUrl = "";
     let receivedAbort = false;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      requestUrl = input instanceof Request ? input.url : String(input);
       requestSignal = init?.signal ?? (input instanceof Request ? input.signal : null);
       requestSignal?.addEventListener("abort", () => { receivedAbort = true; });
       return response({ items: [] });
@@ -125,8 +127,9 @@ describe("typed API client", () => {
     const { historyApi } = await import("./client");
     const controller = new AbortController();
 
-    await historyApi.vehicles({ signal: controller.signal });
+    await historyApi.tripSeries(7, { signal: controller.signal });
     expect(requestSignal).not.toBeNull();
+    expect(requestUrl).toContain("/api/v1/trips/7/series");
     controller.abort();
     expect(receivedAbort).toBe(true);
   });

@@ -112,6 +112,7 @@ type MockOptions = {
   settingsFailure?: boolean;
   settingsFailuresRemaining?: { count: number };
   trajectoryFailure?: boolean;
+  tripSeriesFailure?: boolean;
   language?: "en" | "zh";
   settingsRequests?: { count: number };
   vehicleRequests?: { count: number };
@@ -209,6 +210,15 @@ async function mockHistoryApi(page: Page, options: MockOptions = {}) {
     if (/\/trips\/1$/.test(path)) return route.fulfill({ json: { id: 1, vehicle_id: 1, start: "2026-03-29T00:30:00Z", end: "2026-03-29T01:30:00Z", duration_min: 60, distance_km: 12.5, speed_max_kmh: 72, start_place: "SYNTHETIC Starting Place", end_place: "SYNTHETIC Destination Place", start_battery_level: 82, end_battery_level: 68, estimated_energy_kwh: 2.4, estimated_average_consumption_wh_per_km: 192 } });
     if (/\/trips\/2$/.test(path)) return route.fulfill({ json: { id: 2, vehicle_id: 2, start: "2026-03-30T00:30:00Z", end: "2026-03-30T01:30:00Z", duration_min: 60, distance_km: 22, speed_max_kmh: 72, start_place: "SYNTHETIC Boreal Start", end_place: "SYNTHETIC Boreal End", start_battery_level: 77, end_battery_level: 60, estimated_energy_kwh: 4.1, estimated_average_consumption_wh_per_km: 186 } });
     if (/\/charges\/1$/.test(path)) return route.fulfill({ json: { id: 1, vehicle_id: 1, start: "2026-09-12T20:00:00Z", end: "2026-09-12T20:45:00Z", duration_min: 45, energy_added_kwh: 22.5 } });
+    if (path.endsWith("/trips/1/series")) {
+      if (options.tripSeriesFailure) return route.fulfill({ status: 503, json: { detail: "unavailable" } });
+      return route.fulfill({ json: {
+        trip_id: 1, capability: { available: true, reason: null }, series: [
+          { name: "speed", unit: "km/h", start: "2026-03-29T00:30:00Z", end: "2026-03-29T01:40:00Z", sample_count: 4, bucket_count: 4, aggregation: "mean_min_max", capability: { available: true, reason: null }, points: [{ time: "2026-03-29T00:30:00Z", mean: 38, min: 35, max: 42, value: 38, discontinuity: false }, { time: "2026-03-29T00:40:00Z", mean: 64, min: 60, max: 67, value: 64, discontinuity: false }, { time: "2026-03-29T01:30:00Z", mean: 0, min: 0, max: 0, value: 0, discontinuity: true }, { time: "2026-03-29T01:40:00Z", mean: 20, min: 18, max: 22, value: 20, discontinuity: false }] },
+          { name: "power", unit: "kW", start: "2026-03-29T00:30:00Z", end: "2026-03-29T01:40:00Z", sample_count: 4, bucket_count: 4, aggregation: "mean_min_max", capability: { available: true, reason: null }, points: [{ time: "2026-03-29T00:30:00Z", mean: -8.4, min: -9, max: -8, value: -8.4, discontinuity: false }, { time: "2026-03-29T00:40:00Z", mean: -16.2, min: -17, max: -15, value: -16.2, discontinuity: false }, { time: "2026-03-29T01:30:00Z", mean: null, min: null, max: null, value: null, discontinuity: true }, { time: "2026-03-29T01:40:00Z", mean: -10, min: -12, max: -8, value: -10, discontinuity: false }] },
+        ],
+      } });
+    }
     if (path.endsWith("/trajectory")) {
       if (options.trajectoryFailure) return route.fulfill({ status: 503, json: { detail: "unavailable" } });
       return route.fulfill({ json: { trip_id: 1, points: [{ id: 1, time: "2026-03-29T00:30:00Z", latitude: 52.1, longitude: 4.3, segment_id: 0 }, { id: 2, time: "2026-03-29T00:45:00Z", latitude: 52.15, longitude: 4.35, segment_id: 0 }, { id: 3, time: "2026-03-29T01:30:00Z", latitude: 52.2, longitude: 4.4, segment_id: 1 }, { id: 4, time: "2026-03-29T01:31:00Z", latitude: 52.21, longitude: 4.41, segment_id: 1 }], simplified: true, total_points: 4950 } });
@@ -550,6 +560,39 @@ test.describe("T09 calendar history filters", () => {
     await page.goto("/settings");
     await page.getByRole("button", { name: "Sign out", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
+  });
+});
+
+test.describe("T25 trip speed and power", () => {
+  test("keeps dual-unit data accessible on desktop and mobile", async ({ page }) => {
+    await mockHistoryApi(page);
+    await localTiles(page);
+    await page.goto("/trips/1");
+    await expect(page.getByRole("heading", { name: "Speed and power", exact: true })).toBeVisible();
+    await expect(page.getByText(/Speed \(km\/h\): Values use km\/h/)).toBeVisible();
+    await expect(page.getByText(/Power \(kW\): Values use kW/)).toBeVisible();
+    await page.getByText("Chart data table", { exact: true }).click();
+    await expect(page.getByText("-8.4 kW", { exact: true })).toBeVisible();
+    await expect(page.getByText("Data gap: 0 km/h", { exact: true })).toBeVisible();
+    const paths = page.locator("path.recharts-line-curve");
+    await expect(paths).toHaveCount(2);
+    for (const path of await paths.all()) {
+      await expect(path).toHaveAttribute("d", /.+/);
+      expect((await path.getAttribute("d"))?.match(/M/g)?.length).toBeGreaterThanOrEqual(2);
+    }
+    const chartLabels = await page.locator(".time-series-plot svg text").allTextContents();
+    expect(chartLabels.some((label) => label.includes("2026"))).toBe(true);
+    expect(chartLabels.join(" ")).not.toContain("1970");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  });
+
+  test("keeps the summary and route usable when the series request fails", async ({ page }) => {
+    await mockHistoryApi(page, { tripSeriesFailure: true });
+    await localTiles(page);
+    await page.goto("/trips/1");
+    await expect(page.getByText("Speed and power data could not be loaded. The trip summary and route remain available.")).toBeVisible();
+    await expect(page.getByText(/12\.5 km/)).toBeVisible();
+    await expect(page.getByLabel("Trip route map")).toBeVisible();
   });
 });
 

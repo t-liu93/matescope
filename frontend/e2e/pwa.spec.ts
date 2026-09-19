@@ -66,6 +66,12 @@ async function mockVehicleHistory(context: BrowserContext, delayTrip = false) {
       }
       return;
     }
+    if (path.endsWith("/trips/1/series")) return route.fulfill({ json: {
+      trip_id: 1, capability: { available: true, reason: null }, series: [
+        { name: "speed", unit: "km/h", start: "2026-09-17T10:00:00Z", end: "2026-09-17T11:00:00Z", sample_count: 1, bucket_count: 1, aggregation: "raw", capability: { available: true, reason: null }, points: [{ time: "2026-09-17T10:00:00Z", value: 42, discontinuity: false }] },
+        { name: "power", unit: "kW", start: "2026-09-17T10:00:00Z", end: "2026-09-17T11:00:00Z", sample_count: 1, bucket_count: 1, aggregation: "raw", capability: { available: true, reason: null }, points: [{ time: "2026-09-17T10:00:00Z", value: -5, discontinuity: false }] },
+      ],
+    } });
     if (path.endsWith("/trajectory")) return route.fulfill({ json: {
       trip_id: 1, points: [{ id: 1, time: "2026-09-17T10:00:00Z", latitude: 52.1, longitude: 4.3, segment_id: 0 }], simplified: false, total_points: 1,
     } });

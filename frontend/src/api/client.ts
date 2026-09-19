@@ -266,4 +266,11 @@ export const historyApi = {
         params: { path: { trip_id: tripId } },
       }),
     ),
+  tripSeries: (tripId: number, options?: HistoryRequestOptions) =>
+    unwrap(
+      api.GET("/api/v1/trips/{trip_id}/series", {
+        signal: options?.signal,
+        params: { path: { trip_id: tripId } },
+      }),
+    ),
 };

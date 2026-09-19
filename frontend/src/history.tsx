@@ -26,12 +26,14 @@ import i18n from "./i18n";
 import { useOnlineStatus } from "./pwa";
 import { HistorySelectionGuard, useHistoryContext } from "./history-context";
 import { historyReturn, historyScope, previousCursor, rememberCursor, rememberHistoryReturn } from "./history-navigation";
+import { DualTimeSeriesChart } from "./time-series-chart";
 
 type Trip = components["schemas"]["Trip"];
 type Charge = components["schemas"]["Charge"];
 type HistoryPage = components["schemas"]["TripPage"] | components["schemas"]["ChargePage"];
 type TripPeriodSummary = components["schemas"]["TripPeriodSummary"];
 type ChargePeriodSummary = components["schemas"]["ChargePeriodSummary"];
+type TripSeries = components["schemas"]["TripSeries"];
 
 const TrajectoryMap = lazy(() => import("./trajectory-map"));
 
@@ -444,6 +446,11 @@ function HistoryDetail({ kind }: { kind: "trips" | "charges" }) {
     staleTime: Infinity,
   });
   const trajectory = useQuery({ queryKey: ["trajectory", identifier], queryFn: ({ signal }) => historyApi.trajectory(identifier, { signal }), enabled: online && kind === "trips" && detail.isSuccess && Boolean(settings.data?.preferences?.saved) });
+  const tripSeries = useQuery<TripSeries>({
+    queryKey: ["trip-series", identifier],
+    queryFn: ({ signal }) => historyApi.tripSeries(identifier, { signal }),
+    enabled: online && kind === "trips" && detail.isSuccess && Boolean(settings.data?.preferences?.saved),
+  });
   const [mapModuleFailed, setMapModuleFailed] = useState(false);
   const [tileFailed, setTileFailed] = useState(false);
   useEffect(() => {
@@ -482,6 +489,16 @@ function HistoryDetail({ kind }: { kind: "trips" | "charges" }) {
       {trajectory.data?.simplified && <Text size="sm" c="dimmed">{t("trajectorySimplified", { count: trajectory.data.total_points })}</Text>}
       </Stack></Card>}
     </div>
+    {kind === "trips" && <Card key={`series-${identifier}`} withBorder radius="md"><Stack gap="sm"><Title order={2}>{t("tripSpeedPower")}</Title>
+      {tripSeries.isPending && <Text>{t("loading")}</Text>}
+      {tripSeries.error && <Alert color="yellow">{t("tripSeriesUnavailable")}</Alert>}
+      {tripSeries.data && (() => {
+        const speed = tripSeries.data.series.find((series) => series.name === "speed");
+        const power = tripSeries.data.series.find((series) => series.name === "power");
+        if (!speed || !power) return <Alert color="yellow">{t("tripSeriesUnavailable")}</Alert>;
+        return <DualTimeSeriesChart first={speed} second={power} timezone={timezone} title={t("tripSpeedPower")} firstTitle={t("speed")} secondTitle={t("power")} />;
+      })()}
+    </Stack></Card>}
   </Stack></Container>;
 }
 

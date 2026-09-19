@@ -4,8 +4,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { components } from "./api/schema";
 import i18n from "./i18n";
-import { chartPoints, formatSeriesTime } from "./time-series-chart-data";
-import { TimeSeriesChart } from "./time-series-chart";
+import { chartPoints, dualChartPoints, formatSeriesTime } from "./time-series-chart-data";
+import { DualTimeSeriesChart, TimeSeriesChart } from "./time-series-chart";
 
 type TimeSeries = components["schemas"]["TimeSeries"];
 
@@ -43,6 +43,29 @@ describe("TimeSeriesChart", () => {
     ]);
   });
 
+  it("aligns paired points by time without letting one series gap split the other", () => {
+    const speed: TimeSeries = {
+      ...meanSeries,
+      name: "speed",
+      unit: "km/h",
+      points: [
+        { time: "2026-03-29T00:00:00Z", mean: 42, min: 40, max: 45, value: 42, discontinuity: false },
+        { time: "2026-03-29T00:08:00Z", mean: 0, min: 0, max: 0, value: 0, discontinuity: true },
+      ],
+    };
+    const power: TimeSeries = {
+      ...meanSeries,
+      points: [
+        { time: "2026-03-29T00:00:00Z", mean: -4.2, min: -5, max: -3, value: -4.2, discontinuity: false },
+        { time: "2026-03-29T00:08:00Z", mean: 3.5, min: 2, max: 4, value: 3.5, discontinuity: false },
+      ],
+    };
+    expect(dualChartPoints(speed, power)).toEqual(expect.arrayContaining([
+      { time: Date.parse("2026-03-29T00:08:00Z"), first: null, second: 3.5 },
+      { time: Date.parse("2026-03-29T00:08:00Z"), first: 0, second: 3.5 },
+    ]));
+  });
+
   it("explains aggregation/ranges, formats in the saved timezone, and exposes a keyboard-readable data table", () => {
     render(<MantineProvider><TimeSeriesChart series={meanSeries} timezone="Europe/Amsterdam" title="Power" /></MantineProvider>);
 
@@ -71,5 +94,26 @@ describe("TimeSeriesChart", () => {
     expect(screen.getByText(/最后一个值来自 4 个样本和 4 个时间桶/)).toBeVisible();
     fireEvent.click(screen.getByText("图表数据表"));
     expect(screen.getByText("68 %")).toBeVisible();
+  });
+
+  it("shows speed and negative power on independent unit axes and leaves a usable series visible when the other is unavailable", () => {
+    const speed: TimeSeries = {
+      ...meanSeries,
+      name: "speed",
+      unit: "km/h",
+      points: [{ time: "2026-03-29T00:00:00Z", mean: 42, min: 40, max: 45, value: 42, discontinuity: false }],
+    };
+    render(<MantineProvider><DualTimeSeriesChart first={speed} second={meanSeries} timezone="UTC" title="Speed and power" firstTitle="Speed" secondTitle="Power" /></MantineProvider>);
+
+    expect(screen.getByText(/Speed \(km\/h\): Values use km\/h/, { selector: "p" })).toBeVisible();
+    expect(screen.getByText(/Power \(kW\): Values use kW/, { selector: "p" })).toBeVisible();
+    fireEvent.click(screen.getByText("Chart data table"));
+    expect(screen.getByText("42 km/h")).toBeVisible();
+    expect(screen.getByText("-4.2 kW")).toBeVisible();
+    cleanup();
+
+    render(<MantineProvider><DualTimeSeriesChart first={{ ...speed, capability: { available: false, reason: "insufficient_permissions" } }} second={meanSeries} timezone="UTC" title="Speed and power" firstTitle="Speed" secondTitle="Power" /></MantineProvider>);
+    expect(screen.getByText("Speed: This chart is unavailable.")).toBeVisible();
+    expect(screen.getByText(/Power \(kW\): Values use kW/, { selector: "p" })).toBeVisible();
   });
 });
