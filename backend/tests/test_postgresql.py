@@ -210,6 +210,86 @@ def test_history_capabilities_keep_legacy_history_available(
     assert client.get("/api/v1/trips").status_code == 200
 
 
+def test_trip_places_and_soc_require_only_checked_optional_columns(
+    client: TestClient, admin: psycopg.Connection[Any]
+) -> None:
+    """T13 preserves legacy rows and isolates optional joins to their drive."""
+    legacy = client.get("/api/v1/trips/1")
+    assert legacy.status_code == 200
+    assert {
+        key: legacy.json()[key]
+        for key in ("start_place", "end_place", "start_battery_level", "end_battery_level")
+    } == {
+        "start_place": None,
+        "end_place": None,
+        "start_battery_level": None,
+        "end_battery_level": None,
+    }
+    with optional_grants(admin):
+        original_places = admin.execute(
+            "SELECT start_address_id, end_address_id, start_geofence_id, end_geofence_id "
+            "FROM public.drives WHERE id=1"
+        ).fetchone()
+        original_position = admin.execute(
+            "SELECT start_position_id FROM public.drives WHERE id=5"
+        ).fetchone()
+        original_soc = admin.execute(
+            "SELECT id,battery_level FROM public.positions WHERE id IN (10000,15000) ORDER BY id"
+        ).fetchall()
+        try:
+            admin.execute(
+                "INSERT INTO public.addresses (id,name,road,house_number,city) "
+                "VALUES (-998,'Ignored address','Ignored Road','1','Ignored city'), "
+                "(-999,NULL,'Fallback Road','7','Fallback City')"
+            )
+            admin.execute(
+                "INSERT INTO public.geofences (id,name) "
+                "VALUES (-998,'Primary geofence'), (-999,'   ')"
+            )
+            admin.execute(
+                "UPDATE public.drives SET start_address_id=-998, end_address_id=-999, "
+                "start_geofence_id=-998, end_geofence_id=-999 WHERE id=1"
+            )
+            admin.execute("UPDATE public.positions SET battery_level=76 WHERE id=10000")
+            admin.execute("UPDATE public.positions SET battery_level=61 WHERE id=15000")
+            trip = client.get("/api/v1/trips/1")
+            assert trip.status_code == 200, trip.text
+            assert {
+                key: trip.json()[key]
+                for key in ("start_place", "end_place", "start_battery_level", "end_battery_level")
+            } == {
+                "start_place": "Primary geofence",
+                "end_place": "Fallback Road 7, Fallback City",
+                "start_battery_level": 76,
+                "end_battery_level": 61,
+            }
+
+            # A position belonging to vehicle 2 cannot satisfy vehicle 1's
+            # drive_id join, even when a corrupt optional FK points to it.
+            admin.execute("UPDATE public.drives SET start_position_id=20001 WHERE id=5")
+            isolated = client.get("/api/v1/trips/5")
+            assert isolated.status_code == 200, isolated.text
+            assert isolated.json()["start_battery_level"] is None
+            assert isolated.json()["start_place"] is None
+            assert isolated.json()["end_place"] is None
+        finally:
+            admin.execute(
+                "UPDATE public.drives SET start_position_id=%s WHERE id=5", original_position
+            )
+            admin.execute(
+                "UPDATE public.drives SET start_address_id=%s, end_address_id=%s, "
+                "start_geofence_id=%s, end_geofence_id=%s WHERE id=1",
+                original_places,
+            )
+            for identifier, battery_level in original_soc:
+                admin.execute(
+                    "UPDATE public.positions SET battery_level=%s WHERE id=%s",
+                    (battery_level, identifier),
+                )
+            admin.execute("DELETE FROM public.geofences WHERE id IN (-998,-999)")
+            admin.execute("DELETE FROM public.addresses WHERE id IN (-998,-999)")
+
+
 def test_history_capabilities_validate_all_added_columns(
     client: TestClient, admin: psycopg.Connection[Any]
 ) -> None:

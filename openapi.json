@@ -2934,6 +2934,50 @@
               }
             ],
             "title": "Speed Max Kmh"
+          },
+          "start_place": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Place"
+          },
+          "end_place": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Place"
+          },
+          "start_battery_level": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Battery Level"
+          },
+          "end_battery_level": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Battery Level"
           }
         },
         "type": "object",
@@ -2944,7 +2988,11 @@
           "end",
           "duration_min",
           "distance_km",
-          "speed_max_kmh"
+          "speed_max_kmh",
+          "start_place",
+          "end_place",
+          "start_battery_level",
+          "end_battery_level"
         ],
         "title": "Trip"
       },

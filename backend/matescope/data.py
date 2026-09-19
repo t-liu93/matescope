@@ -47,6 +47,10 @@ class Summary(BaseModel):
 class Trip(Summary):
     distance_km: float | None
     speed_max_kmh: float | None
+    start_place: str | None
+    end_place: str | None
+    start_battery_level: int | None
+    end_battery_level: int | None
 
 
 class Charge(Summary):
@@ -346,13 +350,85 @@ class Window:
 
 
 TRIP_FIELDS = (
-    "id, car_id AS vehicle_id, start_date AS start, end_date AS end, "
-    "duration_min, distance AS distance_km, speed_max AS speed_max_kmh"
+    "d.id, d.car_id AS vehicle_id, d.start_date AS start, d.end_date AS end, "
+    "d.duration_min, d.distance AS distance_km, d.speed_max AS speed_max_kmh"
 )
 CHARGE_FIELDS = (
     "id, car_id AS vehicle_id, start_date AS start, end_date AS end, "
     "duration_min, charge_energy_added AS energy_added_kwh"
 )
+
+
+def trip_projection(
+    capabilities: dict[str, CapabilityReason | None],
+) -> tuple[str, str]:
+    """Build a projection only after optional column grants have been checked."""
+    fields = [TRIP_FIELDS]
+    joins: list[str] = []
+    has_details = capabilities["trip_details"] is None
+    has_locations = capabilities["locations"] is None
+
+    if has_details:
+        # drive_id is part of the M0 grant. It makes an accidentally linked
+        # position from another drive unavailable instead of exposing its SOC.
+        joins.extend(
+            [
+                "LEFT JOIN public.positions AS start_position "
+                "ON start_position.id=d.start_position_id AND start_position.drive_id=d.id",
+                "LEFT JOIN public.positions AS end_position "
+                "ON end_position.id=d.end_position_id AND end_position.drive_id=d.id",
+            ]
+        )
+        fields.extend(
+            [
+                "start_position.battery_level AS start_battery_level",
+                "end_position.battery_level AS end_battery_level",
+            ]
+        )
+    else:
+        fields.extend(
+            [
+                "NULL::smallint AS start_battery_level",
+                "NULL::smallint AS end_battery_level",
+            ]
+        )
+
+    if has_details and has_locations:
+        joins.extend(
+            [
+                "LEFT JOIN public.geofences AS start_geofence "
+                "ON start_geofence.id=d.start_geofence_id",
+                "LEFT JOIN public.addresses AS start_address "
+                "ON start_address.id=d.start_address_id",
+                "LEFT JOIN public.geofences AS end_geofence "
+                "ON end_geofence.id=d.end_geofence_id",
+                "LEFT JOIN public.addresses AS end_address "
+                "ON end_address.id=d.end_address_id",
+            ]
+        )
+        fields.extend(
+            [
+                "COALESCE(NULLIF(btrim(start_geofence.name), ''), "
+                "NULLIF(btrim(start_address.name), ''), "
+                "CASE WHEN NULLIF(concat_ws(' ', NULLIF(btrim(start_address.road), ''), "
+                "NULLIF(btrim(start_address.house_number), '')), '') IS NOT NULL "
+                "AND NULLIF(btrim(start_address.city), '') IS NOT NULL THEN concat_ws(', ', "
+                "concat_ws(' ', NULLIF(btrim(start_address.road), ''), "
+                "NULLIF(btrim(start_address.house_number), '')), btrim(start_address.city)) END) "
+                "AS start_place",
+                "COALESCE(NULLIF(btrim(end_geofence.name), ''), "
+                "NULLIF(btrim(end_address.name), ''), "
+                "CASE WHEN NULLIF(concat_ws(' ', NULLIF(btrim(end_address.road), ''), "
+                "NULLIF(btrim(end_address.house_number), '')), '') IS NOT NULL "
+                "AND NULLIF(btrim(end_address.city), '') IS NOT NULL THEN concat_ws(', ', "
+                "concat_ws(' ', NULLIF(btrim(end_address.road), ''), "
+                "NULLIF(btrim(end_address.house_number), '')), btrim(end_address.city)) END) "
+                "AS end_place",
+            ]
+        )
+    else:
+        fields.extend(["NULL::text AS start_place", "NULL::text AS end_place"])
+    return ", ".join(fields), " ".join(joins)
 
 
 def page(
@@ -370,22 +446,30 @@ def page(
             CHARGE_FIELDS,
         )
     )
-    conditions = [sql.SQL("start_date >= %s AND start_date < %s")]
+    prefix = "d." if kind == "trips" else ""
+    conditions = [sql.SQL(f"{prefix}start_date >= %s AND {prefix}start_date < %s")]
     params: list[object] = [window.start, window.end]
     if window.vehicle_id is not None:
-        conditions.append(sql.SQL("car_id = %s"))
+        conditions.append(sql.SQL(f"{prefix}car_id = %s"))
         params.append(window.vehicle_id)
     if window.after:
-        conditions.append(sql.SQL("(start_date, id) < (%s, %s)"))
+        conditions.append(sql.SQL(f"({prefix}start_date, {prefix}id) < (%s, %s)"))
         params.extend(window.after)
     params.append(window.limit + 1)
-    query = sql.SQL("SELECT {} FROM public.{} WHERE {} ORDER BY start_date DESC, id DESC LIMIT %s")
     with connection(request) as database:
+        joins = ""
+        if kind == "trips":
+            fields, joins = trip_projection(capability_status(database))
         rows = database.execute(
-            query.format(
+            sql.SQL(
+                "SELECT {} FROM public.{}{} WHERE {} ORDER BY {}start_date DESC, {}id DESC LIMIT %s"
+            ).format(
                 sql.SQL(fields),
                 sql.Identifier(table),
+                sql.SQL(" AS d " + joins if kind == "trips" else ""),
                 sql.SQL(" AND ").join(conditions),
+                sql.SQL(prefix),
+                sql.SQL(prefix),
             ),
             params,
         ).fetchall()
@@ -415,10 +499,15 @@ def detail(request: Request, identifier: int, kind: Literal["trips", "charges"])
         )
     )
     with connection(request) as database:
+        joins = ""
+        if kind == "trips":
+            fields, joins = trip_projection(capability_status(database))
         row = database.execute(
-            sql.SQL("SELECT {} FROM public.{} WHERE id=%s").format(
+            sql.SQL("SELECT {} FROM public.{}{} WHERE {}id=%s").format(
                 sql.SQL(fields),
                 sql.Identifier(table),
+                sql.SQL(" AS d " + joins if kind == "trips" else ""),
+                sql.SQL("d." if kind == "trips" else ""),
             ),
             (identifier,),
         ).fetchone()

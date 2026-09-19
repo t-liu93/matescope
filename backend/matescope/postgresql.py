@@ -48,6 +48,9 @@ CAPABILITY_COLUMNS: dict[str, dict[str, tuple[str, ...]]] = {
             "start_ideal_range_km",
             "end_ideal_range_km",
         ),
+        # T13 reads the linked position's original SOC.  Keep this in the
+        # trip-detail capability so a legacy reader never reaches this column.
+        "positions": ("battery_level",),
     },
     "charge_details": {
         "charging_processes": (

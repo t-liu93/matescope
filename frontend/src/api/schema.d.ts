@@ -1395,6 +1395,14 @@ export interface components {
             distance_km: number | null;
             /** Speed Max Kmh */
             speed_max_kmh: number | null;
+            /** Start Place */
+            start_place: string | null;
+            /** End Place */
+            end_place: string | null;
+            /** Start Battery Level */
+            start_battery_level: number | null;
+            /** End Battery Level */
+            end_battery_level: number | null;
         };
         /** TripPage */
         TripPage: {
