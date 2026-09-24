@@ -42,7 +42,7 @@ jobs:
           MATESCOPE_TEST_PG_DSN: postgresql://teslamate_admin:synthetic-only@127.0.0.1:15432/teslamate_synthetic
       - run: pnpm --dir frontend install --frozen-lockfile
       - run: pnpm --dir frontend rebuild esbuild --config.ignore-scripts=false
-      - run: pnpm --dir frontend exec playwright install --with-deps chromium
+      - run: pnpm --dir frontend exec playwright install --with-deps chromium webkit
       - run: uv run python scripts/export_openapi.py
       - run: pnpm --dir frontend generate:api
       - run: git diff --exit-code -- openapi.json frontend/src/api/schema.d.ts
@@ -50,6 +50,10 @@ jobs:
       - run: pnpm --dir frontend typecheck
       - run: pnpm --dir frontend test
       - run: pnpm --dir frontend test:pwa
+      # M1-T34 owns Vite on 49234 and has no dependency on the application
+      # Compose project.  The scale suite is deliberately a separately
+      # invoked, expensive synthetic environment (test:m1:t33).
+      - run: pnpm --dir frontend test:m1:t34
       - run: pnpm --dir frontend build
       - run: docker compose -f compose.yaml -f compose.dev.yaml config --quiet
       - run: docker build --tag matescope:ci .

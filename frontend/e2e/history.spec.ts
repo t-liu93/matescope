@@ -585,8 +585,10 @@ test.describe("T09 calendar history filters", () => {
     await saveSyntheticPostgres(page);
     await finishOnboarding(page);
     await page.goto("/vehicles");
-    await expect(page.getByText("SYNTHETIC Atlas", { exact: true })).toBeVisible();
-    await page.goto("/trips");
+    await expect(page.getByRole("main").getByText("SYNTHETIC Atlas", { exact: true })).toBeVisible();
+    // The fixture is historical; make this real-SQL check independent of the
+    // wall clock rather than relying on the rolling default period.
+    await page.goto("/trips?vehicle=1&preset=all_history");
     await page.locator('a[href^="/trips/1"]').click();
     await expect(page.getByText(/12\.5 km/)).toBeVisible();
     await expect(page.getByLabel("Trip route map")).toBeVisible();
@@ -594,7 +596,7 @@ test.describe("T09 calendar history filters", () => {
     await expect(page.getByText("Showing a simplified route from 4950 recorded positions.")).toBeVisible();
     await page.goto("/charges");
     await page.locator('a[href^="/charges/1"]').click();
-    await expect(page.getByText(/22\.5 kWh/)).toBeVisible();
+    await expect(page.locator(".charge-detail-values").getByText(/22\.5 kWh/)).toBeVisible();
     await page.goto("/settings");
     await page.getByRole("button", { name: "Sign out", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();

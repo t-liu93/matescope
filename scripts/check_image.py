@@ -231,8 +231,8 @@ def main() -> None:
         print(f"{args.platform}: tested artifact {image_id}; no rebuild performed", flush=True)
     finally:
         # Sanitize naturally: app logs never include credentials, and fixtures contain no real data.
-        artifacts = Path("ci-artifacts")
-        artifacts.mkdir(exist_ok=True)
+        artifacts = Path(os.environ.get("MATESCOPE_ARTIFACT_DIR", "ci-artifacts"))
+        artifacts.mkdir(parents=True, exist_ok=True)
         try:
             logs = command(*compose, "logs", "--no-color")
             (artifacts / f"image-{args.platform.split('/')[1]}.log").write_text(logs)

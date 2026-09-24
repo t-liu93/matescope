@@ -8,6 +8,7 @@
 | --- | --- |
 | [接入现有 TeslaMate Compose](operations/existing-teslamate-compose_zh.md) | 在现有安装目录添加 MateScope，仅启动新增服务 |
 | [PostgreSQL 只读配置](operations/postgresql-readonly_zh.md) | 生产系统目录预检与显式准备专用账号 |
+| [M1 使用、升级与验收](operations/m1-dashboard_zh.md) | 使用 M1 Dashboard、安全准备升级并执行所有者走查 |
 | [参考项目](insight/references_zh.md) | 从所有者项目中提取的经验，仅作背景，不继承其要求 |
 | [TeslaMate 洞察](insight/teslamate_zh.md) | 上游观察、产品目标和待验证问题 |
 | [路线图](plan/roadmap_zh.md) | 范围、技术决策，以及唯一权威的里程碑状态表 |

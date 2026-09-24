@@ -4,7 +4,10 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:8000";
 
 export default defineConfig({
   testDir: "./e2e",
-  testIgnore: "pwa.spec.ts",
+  // These suites own their own Vite server or isolated synthetic Compose
+  // project.  Keeping them out of the ordinary application smoke discovery
+  // prevents an implicit localhost origin from being tested.
+  testIgnore: ["pwa.spec.ts", "m1-t33-scale.spec.ts", "m1-t34.spec.ts"],
   fullyParallel: false,
   workers: 1,
   use: {
